@@ -68,47 +68,32 @@ const datasets = [
 
 const DatasetPage = () => {
   return (
-    <div className="min-h-screen bg-[#fafafa] text-[#1a1a1a]">
-      {/* 1. Page Header */}
-      <header className="bg-white border-b border-zinc-200 py-12 px-6">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-3xl font-black tracking-tight mb-3 italic">
-            DATA CATALOG
-          </h1>
-          <p className="text-zinc-500 max-w-2xl leading-relaxed">
-            Download Chennai's public transit data in standardized GTFS formats.
+    <div className="min-h-screen">
+      
+      <header className="bg-white max-w-7xl mx-auto pt-12 px-38">
+        <div className="flex-1">
+              <h1 className="text-3xl mt-6 md:text-5xl text-[#0038A8] font-bold tracking-tighter mb-4 md:mb-6 max-w-3xl">
+                DATA CATALOG 
+              </h1>
+              <p className="text-lg md:text-xl text-gray-700 max-w-2xl md:mb-10">
+                 Download Chennai's public transit data in standardized GTFS formats.
             All datasets are provided under the Open Data License for public
             use.
-          </p>
-        </div>
+              </p>
+            </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-12">
+      <main className="max-w-5xl mx-auto px-6 pb-12">
         <div className="space-y-8">
           {datasets.map((ds) => (
             <div
               key={ds.id}
               className="bg-white border border-zinc-200 rounded-sm overflow-hidden flex flex-col md:flex-row shadow-sm hover:shadow-md transition-shadow"
             >
-              {/* Dataset Info Side */}
               <div className="p-8 flex-1 border-r border-zinc-100">
-                <div className="flex items-center gap-2 mb-4">
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest ${
-                      ds.status === "Updated"
-                        ? "bg-green-100 text-green-700"
-                        : "bg-zinc-100 text-zinc-600"
-                    }`}
-                  >
-                    {ds.status}
-                  </span>
-                  <span className="text-xs font-mono text-zinc-400 italic">
-                    Version: {ds.version}
-                  </span>
-                </div>
 
-                <h3 className="text-2xl font-bold mb-3">{ds.agency}</h3>
-                <p className="text-zinc-500 text-sm mb-6 leading-relaxed">
+                <h3 className="text-2xl pt-6 font-bold text-[#0038A8] mb-3">{ds.agency}</h3>
+                <p className="text-gray-700 text-sm mb-6 leading-relaxed">
                   {ds.description}
                 </p>
 
@@ -126,7 +111,6 @@ const DatasetPage = () => {
                 </div>
               </div>
 
-              {/* Files & Action Side */}
               <div className="bg-zinc-50 p-8 w-full md:w-80 flex flex-col justify-between">
                 <div>
                   <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest mb-4 flex items-center gap-2">
@@ -144,7 +128,7 @@ const DatasetPage = () => {
                   </div>
                 </div>
 
-                <button className="w-full bg-zinc-900 text-white font-bold text-xs py-3 rounded-sm flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors tracking-widest uppercase">
+                <button className="w-full bg-[#0038A8] text-white font-bold text-xs py-3 rounded-sm flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors tracking-widest uppercase">
                   <Download size={14} /> Download ZIP
                 </button>
               </div>

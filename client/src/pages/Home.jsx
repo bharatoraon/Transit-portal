@@ -34,10 +34,10 @@ const HomePage = () => {
         <section className="mb-16">
           <div className="flex flex-col md:flex-row items-center md:items-start gap-8 md:gap-0">
             <div className="flex-1">
-              <h1 className="text-3xl md:text-5xl text-[#0038A8] font-bold tracking-tighter mb-4 md:mb-6 max-w-3xl">
+              <h1 className="text-3xl mt-3 md:text-5xl text-[#0038A8] font-bold tracking-tighter mb-4 md:mb-6 max-w-3xl">
                 The Open Data Backbone for Chennai’s Mobility.
               </h1>
-              <p className="text-lg md:text-xl text-gray-700 max-w-2xl mb-6 md:mb-10">
+              <p className="text-lg md:text-xl text-gray-700 max-w-2xl mb-6 mt-10 md:mb-10">
                 A unified repository for static GTFS datasets, network
                 visualizations for the Chennai Metropolitan Area.
               </p>
@@ -81,7 +81,10 @@ const HomePage = () => {
         </section>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 ">
-          <div className="group p-8 border border-zinc-200 bg-white  transition-all cursor-pointer relative overflow-hidden">
+          <Link
+            to="/maps"
+            className="group p-8 border border-zinc-200 bg-white  transition-all cursor-pointer relative overflow-hidden"
+          >
             <h3 className="text-xl font-bold mb-2 text-[#0038A8]">
               Interactive Network Map
             </h3>
@@ -92,7 +95,7 @@ const HomePage = () => {
             <div className="flex text-[#0038A8] items-center text-sm font-bold uppercase tracking-wider">
               Launch Viewer <ArrowRight className="ml-2 w-4 h-4" />
             </div>
-          </div>
+          </Link>
 
           <Link
             to="/datasets"

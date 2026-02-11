@@ -22,9 +22,9 @@ const Footer = () => {
           
           <div className="col-span-1">
             <div className="flex items-center gap-1 mb-6">
-              <img src="../../public/Cumta_logo.png" alt="Cumta_logo" className="w-15 h-8 bg-white rounded-sm"></img>
+              <img src="../../cumta_logo.png" alt="Cumta_logo" className="w-24 h-8 bg-white rounded-sm"></img>
               <div className="flex flex-col text-white">
-                <span className="text-lg font-bold tracking-tight uppercase leading-none">
+                <span className="text-lg pl-1 font-bold tracking-tight uppercase leading-none">
                   CUMTA
                 </span>
               </div>

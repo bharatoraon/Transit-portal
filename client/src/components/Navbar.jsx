@@ -12,7 +12,7 @@ const Navbar = () => {
             <div className="w-22 h-22 flex items-center justify-center">
               <img src="../../cumta_logo.png" alt="Logo" />
             </div>
-            <span className="text-sm font-black text-zinc-900 leading-none tracking-tighter uppercase">
+            <span className="text-sm font-black text-blue-900 leading-none tracking-tighter uppercase">
               Transit Data Chennai
             </span>
           </div>
