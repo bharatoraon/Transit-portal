@@ -17,9 +17,11 @@ router.get("/api/layers/:tableName", async (req, res) => {
       return res.json(cachedData);
     }
 
-    const tolerance = tableName === "mtc_master" ? 0.0004 : 0.0001;
+    const tolerance = tableName === "mtc_master" ? 0.0006 : 0.0001;
+    let query;
 
-    const query = `
+    if (tableName === "cmrl_master_production") {
+      query = `
             SELECT jsonb_build_object(
                 'type', 'FeatureCollection',
                 'features', COALESCE(jsonb_agg(features.feature), '[]'::jsonb)
@@ -30,13 +32,34 @@ router.get("/api/layers/:tableName", async (req, res) => {
                 'geometry',ST_AsGeoJSON(ST_SimplifyPreserveTopology(wkb_geometry, ${tolerance}))::jsonb,
                 'properties', jsonb_build_object(
                     'fid', ogc_fid,
+                    'stop_name', stop_name,
+                    'route_color', route_color,
                     'feature_type', feature_type  -- Critical for frontend filtering
                 )
               ) AS feature
               FROM ${tableName}
-              LIMIT 10000 
             ) features;
         `;
+    } else {
+      query = `
+            SELECT jsonb_build_object(
+                'type', 'FeatureCollection',
+                'features', COALESCE(jsonb_agg(features.feature), '[]'::jsonb)
+            )
+            FROM (
+              SELECT jsonb_build_object(
+                'type', 'Feature',
+                'geometry',ST_AsGeoJSON(ST_SimplifyPreserveTopology(wkb_geometry, ${tolerance}))::jsonb,
+                'properties', jsonb_build_object(
+                    'fid', ogc_fid,
+                    'stop_name', stop_name,
+                    'feature_type', feature_type  
+                )
+              ) AS feature
+              FROM ${tableName}
+            ) features;
+        `;
+    }
 
     const result = await pool.query(query);
     const geojson = result.rows[0].jsonb_build_object;
