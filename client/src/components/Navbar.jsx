@@ -12,7 +12,7 @@ const Navbar = () => {
             <div className="w-22 h-22 flex items-center justify-center">
               <img src="../../cumta_logo.png" alt="Logo" />
             </div>
-            <span className="text-sm font-black text-blue-900 leading-none tracking-tighter uppercase">
+            <span className="text-sm font-black text-[#1a2caa] leading-none tracking-tighter uppercase">
               Transit Data Chennai
             </span>
           </div>
@@ -37,9 +37,9 @@ const Navbar = () => {
 const NavLink = ({ to, children, current }) => (
   <Link
     to={to}
-    className={`px-5 h-16 flex items-center text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${
+    className={`px-5 h-16 flex items-center text-[#1a2caa] text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${
       current
-        ? "text-blue-700 border-blue-700 bg-blue-50/30"
+        ? "text-[#1a2caa] border-[#1a2caa] bg-blue-50/30"
         : "text-zinc-500 border-transparent hover:text-zinc-900 hover:bg-zinc-50"
     }`}
   >

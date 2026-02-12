@@ -7,6 +7,7 @@ const MapComponent = () => {
   const map = useRef(null);
   const [loadingAgency, setLoadingAgency] = useState(null);
 
+  // --- STATE FOR SEARCH & DROPDOWNS ---
   const [cmrlStops, setCmrlStops] = useState([]);
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
@@ -48,14 +49,14 @@ const MapComponent = () => {
       map.current.setLayoutProperty(
         `${key}-route-layer`,
         "visibility",
-        agencyActive && routesOn ? "visible" : "none"
+        agencyActive && routesOn ? "visible" : "none",
       );
     }
     if (map.current.getLayer(`${key}-stop-layer`)) {
       map.current.setLayoutProperty(
         `${key}-stop-layer`,
         "visibility",
-        agencyActive && stopsOn ? "visible" : "none"
+        agencyActive && stopsOn ? "visible" : "none",
       );
     }
   };
@@ -66,10 +67,11 @@ const MapComponent = () => {
 
     try {
       const response = await fetch(
-        `http://localhost:3000/v1/api/layers/${agency.table}`
+        `http://localhost:3000/v1/api/layers/${agency.table}`,
       );
       const data = await response.json();
 
+      // Extract stops for dropdown if CMRL
       if (key === "cmrl") {
         const stops = data.features
           .filter((f) => f.properties.feature_type?.toLowerCase() === "stop")
@@ -88,33 +90,37 @@ const MapComponent = () => {
         promoteId: "fid",
       });
 
-const routeColor = key === "cmrl" 
-  ? [
-      "match",
-      ["get", "route_color"],
-      "#000092", "#0000FF", 
-      "#00A700", "#00A700", 
-      agency.color 
-    ]
-  : agency.color; 
+      const routeColor =
+        key === "cmrl"
+          ? [
+              "match",
+              ["get", "route_color"], 
+              "#000092",
+              "#0000FF", 
+              "#00A700",
+              "#00A700", 
+              agency.color,
+            ]
+          : agency.color;
 
-map.current.addLayer({
-  id: `${key}-route-layer`,
-  type: "line",
-  source: key,
-  filter: ["==", ["downcase", ["get", "feature_type"]], "route"],
-  layout: {
-    visibility: initialActive && agency.routesVisible ? "visible" : "none",
-    "line-join": "round",
-    "line-cap": "round",
-  },
-  paint: {
-    "line-color": routeColor, 
-    "line-width": 4,
-    "line-opacity": 0.8,
-  },
-});
-      
+      map.current.addLayer({
+        id: `${key}-route-layer`,
+        type: "line",
+        source: key,
+        filter: ["==", ["downcase", ["get", "feature_type"]], "route"],
+        layout: {
+          visibility:
+            initialActive && agency.routesVisible ? "visible" : "none",
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": routeColor, 
+          "line-width": 4,
+          "line-opacity": 0.8,
+        },
+      });
+
       map.current.addLayer({
         id: `${key}-stop-layer`,
         type: "circle",
@@ -153,7 +159,7 @@ map.current.addLayer({
         key,
         isNowActive,
         agency.routesVisible,
-        agency.stopsVisible
+        agency.stopsVisible,
       );
     }
 
@@ -170,7 +176,7 @@ map.current.addLayer({
         key,
         updatedAgency.active,
         updatedAgency.routesVisible,
-        updatedAgency.stopsVisible
+        updatedAgency.stopsVisible,
       );
       return { ...prev, [key]: updatedAgency };
     });
@@ -192,8 +198,6 @@ map.current.addLayer({
         maxZoom: 15,
         duration: 2000,
       });
-
-     
     }
   };
 
@@ -207,36 +211,46 @@ map.current.addLayer({
 
     map.current.on("load", () => {
       loadAndToggle("cmrl", true);
-  map.current.on("click", (e) => {
-        const stopLayers = ["cmrl-stop-layer", "srr-stop-layer", "mtc-stop-layer"];
-        
+
+      map.current.on("click", (e) => {
+        const stopLayers = [
+          "cmrl-stop-layer",
+          "srr-stop-layer",
+          "mtc-stop-layer",
+        ];
+
         const features = map.current.queryRenderedFeatures(e.point, {
-          layers: stopLayers.filter(id => map.current.getLayer(id))
+          layers: stopLayers.filter((id) => map.current.getLayer(id)),
         });
 
         if (features.length > 0) {
           const feature = features[0];
           const coordinates = feature.geometry.coordinates.slice();
           const name = feature.properties.stop_name || "Unknown Station";
-          const agencyLabel = feature.layer.id.split('-')[0].toUpperCase();
+          const agencyLabel = feature.layer.id.split("-")[0].toUpperCase();
 
           new maplibregl.Popup()
             .setLngLat(coordinates)
-            .setHTML(`
+            .setHTML(
+              `
               <div style="padding: 8px; font-family: sans-serif; min-width: 120px;">
                 <b style="color: #333; font-size: 14px;">${name}</b><br/>
                 <span style="color: #666; font-size: 11px;">Agency: ${agencyLabel}</span>
               </div>
-            `)
+            `,
+            )
             .addTo(map.current);
         }
       });
 
-      // Change cursor to pointer on stops
       map.current.on("mousemove", (e) => {
-        const stopLayers = ["cmrl-stop-layer", "srr-stop-layer", "mtc-stop-layer"];
+        const stopLayers = [
+          "cmrl-stop-layer",
+          "srr-stop-layer",
+          "mtc-stop-layer",
+        ];
         const features = map.current.queryRenderedFeatures(e.point, {
-          layers: stopLayers.filter(id => map.current.getLayer(id))
+          layers: stopLayers.filter((id) => map.current.getLayer(id)),
         });
         map.current.getCanvas().style.cursor = features.length ? "pointer" : "";
       });
@@ -246,104 +260,150 @@ map.current.addLayer({
   }, []);
 
   return (
-    <div className="w-full h-screen relative bg-zinc-50 flex flex-col">
-      <div className="absolute top-6 left-6 z-10 w-72 bg-white border border-zinc-200 rounded-sm shadow-sm p-5 overflow-y-auto max-h-[calc(100vh-48px)]">
-        
-        <div className="mb-6 pb-6 border-b border-zinc-200">
-          <h4 className="text-sm font-bold text-[#0038A8] uppercase tracking-wider mb-4">
-            CMRL Route Finder
-          </h4>
-          <div className="space-y-3">
-            <select 
-              className="w-full h-10 px-3 py-2 bg-white border border-zinc-200 rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-[#0038A8] appearance-none cursor-pointer"
-              value={source} 
-              onChange={(e) => setSource(e.target.value)}
-            >
-              <option value="">Source Station</option>
-              {cmrlStops.map((s) => (
-                <option key={s.fid} value={s.name}>{s.name}</option>
-              ))}
-            </select>
-            <select 
-              className="w-full h-10 px-3 py-2 bg-white border border-zinc-200 rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-[#0038A8] appearance-none cursor-pointer"
-              value={destination} 
-              onChange={(e) => setDestination(e.target.value)}
-            >
-              <option value="">Destination Station</option>
-              {cmrlStops.map((s) => (
-                <option key={s.fid} value={s.name}>{s.name}</option>
-              ))}
-            </select>
-            <button 
-              className="w-full py-2.5 bg-[#0038A8] text-white font-bold text-xs uppercase tracking-widest rounded-sm hover:bg-blue-800 transition-colors shadow-sm"
-              onClick={handleSearch}
-            >
-              Find & Zoom
-            </button>
-          </div>
-        </div>
+    <div style={{ width: "100%", height: "100vh", position: "relative" }}>
+      <div
+        className="card shadow border-0 position-absolute m-4"
+        style={{
+          top: 0,
+          left: 0,
+          zIndex: 10,
+          width: "320px",
+          maxHeight: "calc(100vh - 48px)",
+          overflowY: "auto",
+        }}
+      >
+        <div className="card-body">
 
-        <h3 className="text-xs font-mono text-zinc-500 uppercase mb-4 tracking-tighter">
-          Active Agencies
-        </h3>
-        
-        <div className="space-y-4">
-          {Object.keys(agencies).map((key) => (
-            <div key={key} className="p-3 border border-zinc-100 rounded-sm">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-zinc-800 uppercase tracking-tight">
-                  {agencies[key].name}
-                </span>
-                <button
-                  onClick={() => loadAndToggle(key)}
-                  disabled={loadingAgency === agencies[key].name}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                    agencies[key].active ? "" : "bg-zinc-200"
-                  }`}
-                  style={{ backgroundColor: agencies[key].active ? agencies[key].color : undefined }}
-                >
-                  <span
-                    className={`${
-                      agencies[key].active ? "translate-x-6" : "translate-x-1"
-                    } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
-                  />
-                </button>
-              </div>
-
-              {agencies[key].active && (
-                <div className="mt-3 pt-3 border-t border-zinc-50 space-y-2">
-                  <label className="flex items-center text-xs text-zinc-600 cursor-pointer group">
-                    <input 
-                      type="checkbox" 
-                      className="w-3.5 h-3.5 border-zinc-300 rounded-sm text-[#0038A8] focus:ring-[#0038A8] mr-2"
-                      checked={agencies[key].routesVisible} 
-                      onChange={() => toggleSubOption(key, "routesVisible")} 
-                    /> 
-                    <span className="group-hover:text-zinc-900 transition-colors uppercase font-mono tracking-tighter">Routes</span>
-                  </label>
-                  <label className="flex items-center text-xs text-zinc-600 cursor-pointer group">
-                    <input 
-                      type="checkbox" 
-                      className="w-3.5 h-3.5 border-zinc-300 rounded-sm text-[#0038A8] focus:ring-[#0038A8] mr-2"
-                      checked={agencies[key].stopsVisible} 
-                      onChange={() => toggleSubOption(key, "stopsVisible")} 
-                    /> 
-                    <span className="group-hover:text-zinc-900 transition-colors uppercase font-mono tracking-tighter">Stops</span>
-                  </label>
-                </div>
-              )}
+          <div className="mb-4 pb-4 border-bottom">
+            <h4
+              className="card-title h6 fw-bold text-primary mb-3 text-uppercase"
+              style={{ color: "#0038A8" }}
+            >
+              CMRL Route Finder
+            </h4>
+            <div className="vstack gap-3">
+              <select
+                className="form-select form-select-sm border-0 bg-light"
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+              >
+                <option value="">Source Station</option>
+                {cmrlStops.map((s) => (
+                  <option key={s.fid} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="form-select form-select-sm border-0 bg-light"
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+              >
+                <option value="">Destination Station</option>
+                {cmrlStops.map((s) => (
+                  <option key={s.fid} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn btn-primary btn-sm fw-bold text-uppercase w-100"
+                style={{ backgroundColor: "#0038A8", borderColor: "#0038A8" }}
+                onClick={handleSearch}
+              >
+                Find & Zoom
+              </button>
             </div>
-          ))}
-        </div>
-
-        {loadingAgency && (
-          <div className="mt-4 flex items-center justify-center space-x-2 text-[10px] font-mono text-zinc-400 uppercase tracking-widest italic animate-pulse">
-            <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></div>
-            <span>Fetching {loadingAgency}</span>
           </div>
-        )}
+
+          <h3 className="card-subtitle h6 text-muted text-uppercase mb-3 fw-bold small">
+            Active Agencies
+          </h3>
+
+          <div className="vstack gap-3">
+            {Object.keys(agencies).map((key) => (
+              <div
+                key={key}
+                className="p-3 border rounded-3 bg-light bg-opacity-50"
+              >
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="fw-bold text-dark small text-uppercase">
+                    {agencies[key].name}
+                  </span>
+                  <div className="form-check form-switch m-0">
+                    <input
+                      className="form-check-input cursor-pointer"
+                      type="checkbox"
+                      role="switch"
+                      checked={agencies[key].active}
+                      onChange={() => loadAndToggle(key)}
+                      disabled={loadingAgency === agencies[key].name}
+                      style={{
+                        backgroundColor: agencies[key].active
+                          ? agencies[key].color
+                          : undefined,
+                        borderColor: agencies[key].active
+                          ? agencies[key].color
+                          : undefined,
+                        width: "2.5rem",
+                        height: "1.25rem",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {agencies[key].active && (
+                  <div className="mt-3 pt-2 border-top border-secondary border-opacity-10 vstack gap-2">
+                    <div className="form-check">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`${key}-routes-toggle`}
+                        checked={agencies[key].routesVisible}
+                        onChange={() => toggleSubOption(key, "routesVisible")}
+                      />
+                      <label
+                        className="form-check-label small text-muted text-uppercase font-monospace"
+                        htmlFor={`${key}-routes-toggle`}
+                      >
+                        Routes
+                      </label>
+                    </div>
+                    <div className="form-check">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`${key}-stops-toggle`}
+                        checked={agencies[key].stopsVisible}
+                        onChange={() => toggleSubOption(key, "stopsVisible")}
+                      />
+                      <label
+                        className="form-check-label small text-muted text-uppercase font-monospace"
+                        htmlFor={`${key}-stops-toggle`}
+                      >
+                        Stops
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {loadingAgency && (
+            <div className="mt-4 d-flex align-items-center justify-content-center text-muted small opacity-50">
+              <div
+                className="spinner-border spinner-border-sm me-2 text-primary"
+                role="status"
+              ></div>
+              <span className="text-uppercase font-monospace small">
+                Fetching {loadingAgency}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
-      <div ref={mapContainer} className="w-full h-full" />
+      <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
     </div>
   );
 };
