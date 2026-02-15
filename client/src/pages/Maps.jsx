@@ -1,11 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import {
+  Search,
+  Map as MapIcon,
+  Navigation2,
+  Layers,
+  Info,
+  ChevronLeft,
+  ChevronRight,
+  ArrowRight,
+  Loader2,
+} from "lucide-react";
 
 const MapComponent = () => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const [loadingAgency, setLoadingAgency] = useState(null);
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
   // --- STATE FOR SEARCH & DROPDOWNS ---
   const [cmrlStops, setCmrlStops] = useState([]);
@@ -16,10 +29,11 @@ const MapComponent = () => {
     cmrl: {
       name: "CMRL",
       table: "cmrl_master_production",
-      color: "#007bff",
+      color: "#0038A8",
       active: true,
       routesVisible: true,
       stopsVisible: true,
+      labelsVisible: false,
       loaded: false,
     },
     srr: {
@@ -29,6 +43,7 @@ const MapComponent = () => {
       active: false,
       routesVisible: true,
       stopsVisible: true,
+      labelsVisible: false,
       loaded: false,
     },
     mtc: {
@@ -38,11 +53,18 @@ const MapComponent = () => {
       active: false,
       routesVisible: true,
       stopsVisible: true,
+      labelsVisible: false,
       loaded: false,
     },
   });
 
-  const updateLayerVisibility = (key, agencyActive, routesOn, stopsOn) => {
+  const updateLayerVisibility = (
+    key,
+    agencyActive,
+    routesOn,
+    stopsOn,
+    labelsOn,
+  ) => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
     if (map.current.getLayer(`${key}-route-layer`)) {
@@ -59,6 +81,20 @@ const MapComponent = () => {
         agencyActive && stopsOn ? "visible" : "none",
       );
     }
+    if (map.current.getLayer(`${key}-stop-label-layer`)) {
+      map.current.setLayoutProperty(
+        `${key}-stop-label-layer`,
+        "visibility",
+        agencyActive && labelsOn ? "visible" : "none",
+      );
+    }
+    if (map.current.getLayer(`${key}-route-label-layer`)) {
+      map.current.setLayoutProperty(
+        `${key}-route-label-layer`,
+        "visibility",
+        agencyActive && labelsOn ? "visible" : "none",
+      );
+    }
   };
 
   const fetchLayer = async (key, initialActive) => {
@@ -71,7 +107,6 @@ const MapComponent = () => {
       );
       const data = await response.json();
 
-      // Extract stops for dropdown if CMRL
       if (key === "cmrl") {
         const stops = data.features
           .filter((f) => f.properties.feature_type?.toLowerCase() === "stop")
@@ -94,11 +129,11 @@ const MapComponent = () => {
         key === "cmrl"
           ? [
               "match",
-              ["get", "route_color"], 
+              ["get", "route_color"],
               "#000092",
-              "#0000FF", 
+              "#000092",
               "#00A700",
-              "#00A700", 
+              "#00A700",
               agency.color,
             ]
           : agency.color;
@@ -115,9 +150,19 @@ const MapComponent = () => {
           "line-cap": "round",
         },
         paint: {
-          "line-color": routeColor, 
-          "line-width": 4,
-          "line-opacity": 0.8,
+          "line-color": routeColor,
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            10,
+            2,
+            14,
+            5,
+            18,
+            8,
+          ],
+          "line-opacity": 0.85,
         },
       });
 
@@ -130,10 +175,54 @@ const MapComponent = () => {
           visibility: initialActive && agency.stopsVisible ? "visible" : "none",
         },
         paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 4, 16, 10],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 8],
           "circle-color": "#ffffff",
           "circle-stroke-width": 2,
-          "circle-stroke-color": "#000000",
+          "circle-stroke-color": agency.color,
+        },
+      });
+
+      // Stop Labels
+      map.current.addLayer({
+        id: `${key}-stop-label-layer`,
+        type: "symbol",
+        source: key,
+        filter: ["==", ["downcase", ["get", "feature_type"]], "stop"],
+        layout: {
+          visibility:
+            initialActive && agency.labelsVisible ? "visible" : "none",
+          "text-field": ["get", "stop_name"],
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-size": 12,
+          "text-offset": [0, 1.5],
+          "text-anchor": "top",
+        },
+        paint: {
+          "text-color": agency.color,
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 2,
+        },
+      });
+
+      // Route Labels
+      map.current.addLayer({
+        id: `${key}-route-label-layer`,
+        type: "symbol",
+        source: key,
+        filter: ["==", ["downcase", ["get", "feature_type"]], "route"],
+        layout: {
+          visibility:
+            initialActive && agency.labelsVisible ? "visible" : "none",
+          "symbol-placement": "line",
+          "text-field": ["get", "route_short_name"],
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-size": 11,
+          "text-offset": [0, -1],
+        },
+        paint: {
+          "text-color": agency.color,
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 2,
         },
       });
 
@@ -160,9 +249,9 @@ const MapComponent = () => {
         isNowActive,
         agency.routesVisible,
         agency.stopsVisible,
+        agency.labelsVisible,
       );
     }
-
     setAgencies((prev) => ({
       ...prev,
       [key]: { ...prev[key], active: isNowActive },
@@ -177,6 +266,7 @@ const MapComponent = () => {
         updatedAgency.active,
         updatedAgency.routesVisible,
         updatedAgency.stopsVisible,
+        updatedAgency.labelsVisible,
       );
       return { ...prev, [key]: updatedAgency };
     });
@@ -184,7 +274,6 @@ const MapComponent = () => {
 
   const handleSearch = () => {
     if (!source || !destination || !map.current) return;
-
     const startStation = cmrlStops.find((s) => s.name === source);
     const endStation = cmrlStops.find((s) => s.name === destination);
 
@@ -192,11 +281,11 @@ const MapComponent = () => {
       const bounds = new maplibregl.LngLatBounds()
         .extend(startStation.coords)
         .extend(endStation.coords);
-
       map.current.fitBounds(bounds, {
         padding: 100,
         maxZoom: 15,
         duration: 2000,
+        pitch: 45,
       });
     }
   };
@@ -206,10 +295,42 @@ const MapComponent = () => {
       container: mapContainer.current,
       style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
       center: [80.22, 13.06],
-      zoom: 11,
+      zoom: 13,
+      pitch: 45, // 3D View
+      bearing: -17,
+      antialias: true,
     });
 
     map.current.on("load", () => {
+      // Add 3D Buildings
+      const layers = map.current.getStyle().layers;
+      const labelLayerId = layers.find(
+        (l) => l.type === "symbol" && l.layout["text-field"],
+      )?.id;
+
+      map.current.addLayer({
+        id: "3d-buildings",
+        source: "carto",
+        "source-layer": "building",
+        type: "fill-extrusion",
+        minzoom: 14,
+        paint: {
+          "fill-extrusion-color": "#e0e0e0",
+          "fill-extrusion-height": ["get", "render_height"],
+          "fill-extrusion-base": ["get", "render_min_height"],
+          "fill-extrusion-opacity": 0.6,
+        },
+      });
+
+      map.current.addControl(
+        new maplibregl.NavigationControl({
+          visualizePitch: true,
+          showZoom: true,
+          showCompass: true,
+        }),
+        "bottom-right",
+      );
+
       loadAndToggle("cmrl", true);
 
       map.current.on("click", (e) => {
@@ -218,7 +339,6 @@ const MapComponent = () => {
           "srr-stop-layer",
           "mtc-stop-layer",
         ];
-
         const features = map.current.queryRenderedFeatures(e.point, {
           layers: stopLayers.filter((id) => map.current.getLayer(id)),
         });
@@ -229,30 +349,21 @@ const MapComponent = () => {
           const name = feature.properties.stop_name || "Unknown Station";
           const agencyLabel = feature.layer.id.split("-")[0].toUpperCase();
 
-          new maplibregl.Popup()
+          new maplibregl.Popup({
+            className: "station-popup",
+            closeButton: false,
+          })
             .setLngLat(coordinates)
             .setHTML(
               `
-              <div style="padding: 8px; font-family: sans-serif; min-width: 120px;">
-                <b style="color: #333; font-size: 14px;">${name}</b><br/>
-                <span style="color: #666; font-size: 11px;">Agency: ${agencyLabel}</span>
+              <div class="p-2 font-sans">
+                <div class="text-[10px] fw-bold text-uppercase opacity-75">${agencyLabel} System</div>
+                <div class="h6 mb-0 fw-black text-uppercase">${name}</div>
               </div>
             `,
             )
             .addTo(map.current);
         }
-      });
-
-      map.current.on("mousemove", (e) => {
-        const stopLayers = [
-          "cmrl-stop-layer",
-          "srr-stop-layer",
-          "mtc-stop-layer",
-        ];
-        const features = map.current.queryRenderedFeatures(e.point, {
-          layers: stopLayers.filter((id) => map.current.getLayer(id)),
-        });
-        map.current.getCanvas().style.cursor = features.length ? "pointer" : "";
       });
     });
 
@@ -260,150 +371,376 @@ const MapComponent = () => {
   }, []);
 
   return (
-    <div style={{ width: "100%", height: "100vh", position: "relative" }}>
+    <div
+      className="w-100 bg-light"
+      style={{ height: "calc(100vh - 64px)", position: "relative" }}
+    >
+      {/* LEFT PANEL: AGENCY CONTROLS */}
       <div
-        className="card shadow border-0 position-absolute m-4"
+        className="position-absolute m-3 transition-all duration-300"
         style={{
           top: 0,
           left: 0,
           zIndex: 10,
-          width: "320px",
-          maxHeight: "calc(100vh - 48px)",
-          overflowY: "auto",
+          width: leftPanelCollapsed ? "48px" : "240px",
+          height: leftPanelCollapsed ? "48px" : "auto",
         }}
+        onMouseEnter={() => leftPanelCollapsed && null}
       >
-        <div className="card-body">
-
-          <div className="mb-4 pb-4 border-bottom">
-            <h4
-              className="card-title h6 fw-bold text-primary mb-3 text-uppercase"
-              style={{ color: "#0038A8" }}
-            >
-              CMRL Route Finder
-            </h4>
-            <div className="vstack gap-3">
-              <select
-                className="form-select form-select-sm border-0 bg-light"
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
+        <div className="card shadow-sm border-0 rounded-4 overflow-hidden h-100">
+          <div className="card-header bg-white border-bottom p-0">
+            <div className="d-flex align-items-center justify-content-between p-3">
+              <div
+                className="d-flex align-items-center flex-grow-1 cursor-pointer"
+                onClick={() =>
+                  leftPanelCollapsed && setLeftPanelCollapsed(false)
+                }
+                title={leftPanelCollapsed ? "Layers" : ""}
               >
-                <option value="">Source Station</option>
-                {cmrlStops.map((s) => (
-                  <option key={s.fid} value={s.name}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="form-select form-select-sm border-0 bg-light"
-                value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-              >
-                <option value="">Destination Station</option>
-                {cmrlStops.map((s) => (
-                  <option key={s.fid} value={s.name}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+                <Layers
+                  size={18}
+                  className="text-[#1a2caa] me-2 flex-shrink-0"
+                />
+                {!leftPanelCollapsed && (
+                  <h6 className="mb-0 fw-bold text-uppercase tracking-wider small text-muted">
+                    Layers
+                  </h6>
+                )}
+              </div>
               <button
-                className="btn btn-primary btn-sm fw-bold text-uppercase w-100"
-                style={{ backgroundColor: "#0038A8", borderColor: "#0038A8" }}
-                onClick={handleSearch}
+                className="btn btn-link p-0 text-muted shadow-none border-0"
+                onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
               >
-                Find & Zoom
+                {leftPanelCollapsed ? (
+                  <ChevronRight size={18} />
+                ) : (
+                  <ChevronLeft size={18} />
+                )}
               </button>
             </div>
           </div>
+          {!leftPanelCollapsed && (
+            <div
+              className="card-body p-2 scroll-modern"
+              style={{ maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}
+            >
+              <div className="flex flex-col gap-3">
+                {Object.keys(agencies).map((key) => (
+                  <div
+                    key={key}
+                    className={`p-4 rounded-2xl transition-all duration-200 border shadow-sm ${
+                      agencies[key].active
+                        ? "bg-white border-slate-200"
+                        : "bg-white border-slate-100 opacity-80"
+                    }`}
+                  >
+                    {/* Header / Main Toggle */}
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`font-bold text-base ${agencies[key].active ? "text-[#1a2caa]" : "text-slate-500"}`}
+                        >
+                          {agencies[key].name}
+                        </span>
+                        {loadingAgency === agencies[key].name && (
+                          <Loader2
+                            size={16}
+                            className="text-blue-500 animate-spin"
+                          />
+                        )}
+                      </div>
 
-          <h3 className="card-subtitle h6 text-muted text-uppercase mb-3 fw-bold small">
-            Active Agencies
-          </h3>
-
-          <div className="vstack gap-3">
-            {Object.keys(agencies).map((key) => (
-              <div
-                key={key}
-                className="p-3 border rounded-3 bg-light bg-opacity-50"
-              >
-                <div className="d-flex justify-content-between align-items-center">
-                  <span className="fw-bold text-dark small text-uppercase">
-                    {agencies[key].name}
-                  </span>
-                  <div className="form-check form-switch m-0">
-                    <input
-                      className="form-check-input cursor-pointer"
-                      type="checkbox"
-                      role="switch"
-                      checked={agencies[key].active}
-                      onChange={() => loadAndToggle(key)}
-                      disabled={loadingAgency === agencies[key].name}
-                      style={{
-                        backgroundColor: agencies[key].active
-                          ? agencies[key].color
-                          : undefined,
-                        borderColor: agencies[key].active
-                          ? agencies[key].color
-                          : undefined,
-                        width: "2.5rem",
-                        height: "1.25rem",
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {agencies[key].active && (
-                  <div className="mt-3 pt-2 border-top border-secondary border-opacity-10 vstack gap-2">
-                    <div className="form-check">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        id={`${key}-routes-toggle`}
-                        checked={agencies[key].routesVisible}
-                        onChange={() => toggleSubOption(key, "routesVisible")}
-                      />
-                      <label
-                        className="form-check-label small text-muted text-uppercase font-monospace"
-                        htmlFor={`${key}-routes-toggle`}
-                      >
-                        Routes
+                      {/* The Toggle Switch Fix */}
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={agencies[key].active}
+                          onChange={() => loadAndToggle(key)}
+                          disabled={loadingAgency === agencies[key].name}
+                        />
+                        <div
+                          style={{
+                            backgroundColor: agencies[key].active
+                              ? agencies[key].color
+                              : "",
+                          }}
+                          className={`w-12 h-6 bg-slate-200 rounded-full peer 
+              transition-colors duration-200 ease-in-out
+              
+              /* The Ball (Pseudo-element) */
+              after:content-[''] 
+              after:absolute after:top-[2px] after:start-[2px] 
+              after:bg-white after:rounded-full after:h-5 after:w-5 
+              after:transition-all after:duration-200 after:shadow-md
+              
+              /* Exact translation to hit the end of the track */
+              peer-checked:after:translate-x-[24px] 
+              ${loadingAgency === agencies[key].name ? "opacity-50" : ""}`}
+                        ></div>
                       </label>
                     </div>
-                    <div className="form-check">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        id={`${key}-stops-toggle`}
-                        checked={agencies[key].stopsVisible}
-                        onChange={() => toggleSubOption(key, "stopsVisible")}
-                      />
-                      <label
-                        className="form-check-label small text-muted text-uppercase font-monospace"
-                        htmlFor={`${key}-stops-toggle`}
-                      >
-                        Stops
-                      </label>
-                    </div>
+
+                    {/* Sub-options Accordion */}
+                    {agencies[key].active && (
+                      <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-2">
+                        {["routesVisible", "stopsVisible", "labelsVisible"].map(
+                          (option) => (
+                            <div
+                              key={option}
+                              className="flex items-center justify-between px-1"
+                            >
+                              <label className="text-xs text-[#1a2caa] uppercase font-bold tracking-widest">
+                                {option.replace("Visible", "")}
+                              </label>
+                              <input
+                                type="checkbox"
+                                className="w-5 h-5 rounded border-slate-300 text-[#1a2caa] focus:ring-blue-500 transition-all cursor-pointer"
+                                checked={agencies[key][option]}
+                                onChange={() => toggleSubOption(key, option)}
+                              />
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-
-          {loadingAgency && (
-            <div className="mt-4 d-flex align-items-center justify-content-center text-muted small opacity-50">
-              <div
-                className="spinner-border spinner-border-sm me-2 text-primary"
-                role="status"
-              ></div>
-              <span className="text-uppercase font-monospace small">
-                Fetching {loadingAgency}
-              </span>
             </div>
           )}
         </div>
       </div>
-      <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
+
+      {/* RIGHT PANEL: ROUTE FINDER */}
+      <div
+        className="position-absolute m-3 transition-all duration-300"
+        style={{
+          top: 0,
+          right: 0,
+          zIndex: 10,
+          width: rightPanelCollapsed ? "48px" : "320px",
+          height: rightPanelCollapsed ? "48px" : "auto",
+        }}
+      >
+        <div className="card shadow-lg border-0 rounded-4 overflow-hidden h-100">
+          <div className="card-header bg-white border-bottom p-0">
+            <div className="d-flex align-items-center justify-content-between p-3">
+              <div
+                className="d-flex align-items-center flex-grow-1 cursor-pointer"
+                onClick={() =>
+                  rightPanelCollapsed && setRightPanelCollapsed(false)
+                }
+                title={rightPanelCollapsed ? "Route Finder" : ""}
+              >
+                <Navigation2
+                  size={18}
+                  className="text-[#1a2caa] me-2 flex-shrink-0"
+                />
+                {!rightPanelCollapsed && (
+                  <h6 className="mb-0 fw-bold text-uppercase tracking-widest small text-muted">
+                    Route Finder
+                  </h6>
+                )}
+              </div>
+              <button
+                className="btn btn-link p-0 text-muted shadow-none border-0"
+                onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+              >
+                {rightPanelCollapsed ? (
+                  <ChevronLeft size={18} />
+                ) : (
+                  <ChevronRight size={18} />
+                )}
+              </button>
+            </div>
+          </div>
+          {!rightPanelCollapsed && (
+            <div className="card-body p-3">
+              <div className="vstack gap-3">
+                <div className="position-relative">
+                  <div className="d-flex align-items-center mb-2">
+                    <label className="small fw-bold text-muted text-uppercase m-0 tracking-tighter">
+                      Origin Stop
+                    </label>
+                  </div>
+                  <select
+                    className="form-select ux-form-select bg-light border-0 rounded-3 shadow-none p-2 ps-3"
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
+                    style={{ fontSize: "0.85rem" }}
+                  >
+                    <option value="">Select Source...</option>
+                    {cmrlStops.map((s) => (
+                      <option key={s.fid} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="position-relative">
+                  <div className="d-flex align-items-center mb-2">
+                    <label className="small fw-bold text-muted text-uppercase m-0 tracking-tighter">
+                      Destination Stop
+                    </label>
+                  </div>
+                  <select
+                    className="form-select ux-form-select bg-light border-0 rounded-3 shadow-none p-2 ps-3"
+                    value={destination}
+                    onChange={(e) => setDestination(e.target.value)}
+                    style={{ fontSize: "0.85rem" }}
+                  >
+                    <option value="">Select Destination...</option>
+                    {cmrlStops.map((s) => (
+                      <option key={s.fid} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  className="btn btn-primary w-100 rounded-3 fw-bold py-2 shadow-sm text-uppercase d-flex align-items-center justify-content-center transition-all hover-shadow mt-2"
+                  style={{
+                    backgroundColor: "#1a2caa",
+                    borderColor: "#1a2caa",
+                    letterSpacing: "0.5px",
+                  }}
+                  onClick={handleSearch}
+                >
+                  <Search size={16} className="me-2" /> Find Route
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* BOTTOM RIGHT: LEGEND (to the left of NavigationControl) */}
+      <div
+        className="position-absolute m-3"
+        style={{ bottom: 0, right: "50px", zIndex: 10, width: "220px" }}
+      >
+        <div className="card shadow-sm border-0 rounded-4 overflow-hidden">
+          <div className="card-header bg-white border-bottom p-2 px-3">
+            <div className="d-flex align-items-center">
+              <Info size={14} className="text-secondary me-2" />
+              <h6 className="mb-0 fw-bold text-uppercase tracking-wider extra-small text-muted">
+                Map Legend
+              </h6>
+            </div>
+          </div>
+          <div className="card-body p-3">
+            <div className="vstack gap-2">
+              {agencies.cmrl.active && (
+                <>
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      style={{
+                        width: "12px",
+                        height: "3px",
+                        backgroundColor: "#000092",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span className="extra-small fw-semibold text-muted">
+                      CMRL Blue Line
+                    </span>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      style={{
+                        width: "12px",
+                        height: "3px",
+                        backgroundColor: "#00A700",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span className="extra-small fw-semibold text-muted">
+                      CMRL Green Line
+                    </span>
+                  </div>
+                </>
+              )}
+              {agencies.srr.active && (
+                <div className="d-flex align-items-center gap-2">
+                  <div
+                    style={{
+                      width: "12px",
+                      height: "3px",
+                      backgroundColor: agencies.srr.color,
+                      borderRadius: "2px",
+                    }}
+                  ></div>
+                  <span className="extra-small fw-semibold text-muted">
+                    Suburban Rail
+                  </span>
+                </div>
+              )}
+              {agencies.mtc.active && (
+                <div className="d-flex align-items-center gap-2">
+                  <div
+                    style={{
+                      width: "12px",
+                      height: "3px",
+                      backgroundColor: agencies.mtc.color,
+                      borderRadius: "2px",
+                    }}
+                  ></div>
+                  <span className="extra-small fw-semibold text-muted">
+                    MTC Bus Routes
+                  </span>
+                </div>
+              )}
+              {(agencies.cmrl.active ||
+                agencies.srr.active ||
+                agencies.mtc.active) && (
+                <div className="d-flex align-items-center gap-2 mt-1 pt-1 border-top">
+                  <div
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "50%",
+                      backgroundColor: "#fff",
+                      border: "2px solid #555",
+                    }}
+                  ></div>
+                  <span className="extra-small fw-semibold text-muted">
+                    Station / Stop
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* MAP CONTAINER */}
+      <div ref={mapContainer} className="w-100 h-100" />
+
+      <style>{`
+        .extra-small { font-size: 0.65rem; }
+        .station-popup .maplibregl-popup-content {
+          border-radius: 12px;
+          padding: 0;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+          border: none;
+        }
+        .scroll-modern::-webkit-scrollbar {
+          width: 4px;
+        }
+        .scroll-modern::-webkit-scrollbar-track {
+          background: #f1f1f1;
+        }
+        .scroll-modern::-webkit-scrollbar-thumb {
+          background: #ccc;
+          border-radius: 10px;
+        }
+        .scroll-modern::-webkit-scrollbar-thumb:hover {
+          background: #aaa;
+        }
+      `}</style>
     </div>
   );
 };

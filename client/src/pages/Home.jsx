@@ -19,7 +19,41 @@ const RollingNumber = ({ value }) => {
   return <span>{displayValue.toLocaleString()}</span>;
 };
 
+let cachedStats = null;
+
 const HomePage = () => {
+  const [stats, setStats] = useState(
+    cachedStats || {
+      routes: 842, 
+      stops: 3521,
+      agencies: 3,
+    },
+  );
+  const [loading, setLoading] = useState(!cachedStats);
+
+  useEffect(() => {
+    
+    if (cachedStats) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchStats = async () => {
+      try {
+        const response = await fetch("http://localhost:3000/v1/api/stats");
+        if (!response.ok) throw new Error("Failed to fetch stats");
+        const data = await response.json();
+        cachedStats = data; 
+        setStats(data);
+      } catch (err) {
+        console.error("Error fetching stats:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStats();
+  }, []);
+
   return (
     <div className="ux-bg-light min-vh-100">
       <main className="container py-5">
@@ -32,7 +66,7 @@ const HomePage = () => {
               >
                 The Open Data Backbone for Chennai’s Mobility.
               </h1>
-              <p className="lead text-secondary mb-5 mt-">
+              <p className="lead text-secondary mb-5">
                 A unified repository for static GTFS datasets, network
                 visualizations for the Chennai Metropolitan Area.
               </p>
@@ -50,36 +84,36 @@ const HomePage = () => {
 
           <div className="row g-0 border rounded shadow-sm bg-white mt-4 overflow-hidden">
             <div className="col-md-4 p-4 border-end">
-              <p className="text-uppercase text-muted small fw-bold mb-1 font-monospace">
+              <p className="text-uppercase text-muted small fw-bold mb-1 ">
                 Total Indexed Routes
               </p>
               <h2
-                className="display-5 fw-bold text font-monospace"
+                className="display-5 fw-bold text "
                 style={{ color: "#1a2caa" }}
               >
-                <RollingNumber value={842} />
+                <RollingNumber value={stats.routes} />
               </h2>
             </div>
             <div className="col-md-4 p-4 border-end">
-              <p className="text-uppercase text-muted small fw-bold mb-1 font-monospace">
+              <p className="text-uppercase text-muted small fw-bold mb-1 ">
                 Mapped Stops
               </p>
               <h2
-                className="display-5 fw-bold text font-monospace"
+                className="display-5 fw-bold text "
                 style={{ color: "#1a2caa" }}
               >
-                <RollingNumber value={3521} />
+                <RollingNumber value={stats.stops} />
               </h2>
             </div>
             <div className="col-md-4 p-4">
-              <p className="text-uppercase text-muted small fw-bold mb-1 font-monospace">
+              <p className="text-uppercase text-muted small fw-bold mb-1 ">
                 Active Agencies
               </p>
               <h2
-                className="display-5 fw-bold text font-monospace"
+                className="display-5 fw-bold text"
                 style={{ color: "#1a2caa" }}
               >
-                <RollingNumber value={3} />
+                <RollingNumber value={stats.agencies} />
               </h2>
             </div>
           </div>

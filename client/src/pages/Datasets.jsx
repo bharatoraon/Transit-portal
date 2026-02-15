@@ -70,27 +70,29 @@ const DatasetPage = () => {
   return (
     <div className="ux-bg-light min-vh-100">
       <header className="py-4">
-        <div className="row align-items-center px-21">
-          <div className="col-lg-7">
-            <h1
-              className="display-5 mt-4 fw-bold mb-4 text-[#1a2caa]"
-              style={{ letterSpacing: "-1.5px" }}
-            >
-              Data Catalog
-            </h1>
-            <p className="lead text-secondary mb-5 mt-">
-              Download Chennai's public transit data in standardized GTFS
-              formats. All datasets are provided under the Open Data License for
-              public use.
-            </p>
-          </div>
-          <div className="col-lg-5 d-flex justify-content-center">
-            <img
-              src="../../multimodeltransport.jpg"
-              alt="multimodeltransport"
-              className="img-fluid rounded-lg mb-4"
-              style={{ maxHeight: "350px" }}
-            />
+        <div className="container">
+          <div className="row align-items-center">
+            <div className="col-lg-7">
+              <h1
+                className="display-5 mt-4 fw-bold mb-4 text-[#1a2caa]"
+                style={{ letterSpacing: "-1.5px" }}
+              >
+                Data Catalog
+              </h1>
+              <p className="lead text-secondary mb-5 mt-">
+                Download Chennai's public transit data in standardized GTFS
+                formats. All datasets are provided under the Open Data License for
+                public use.
+              </p>
+            </div>
+            <div className="col-lg-5 d-flex justify-content-center">
+              <img
+                src="../../multimodeltransport.jpg"
+                alt="multimodeltransport"
+                className="img-fluid rounded-lg mb-4"
+                style={{ maxHeight: "350px" }}
+              />
+            </div>
           </div>
         </div>
       </header>
@@ -142,7 +144,7 @@ const DatasetPage = () => {
                       {ds.files.map((file) => (
                         <span
                           key={file}
-                          className="badge bg-white text-secondary border font-monospace py-1 px-2 fw-normal"
+                          className="badge bg-white text-secondary border py-1 px-2 fw-normal"
                         >
                           {file}
                         </span>
