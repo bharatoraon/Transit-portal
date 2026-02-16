@@ -11,6 +11,16 @@ import {
   ChevronRight,
   ArrowRight,
   Loader2,
+  Clock,
+  Milestone,
+  List,
+  History,
+  AlertCircle,
+  ChevronDown,
+  RotateCcw,
+  Plus,
+  Minus,
+  Compass,
 } from "lucide-react";
 
 const MapComponent = () => {
@@ -21,9 +31,19 @@ const MapComponent = () => {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
   // --- STATE FOR SEARCH & DROPDOWNS ---
-  const [cmrlStops, setCmrlStops] = useState([]);
+  const [allStops, setAllStops] = useState([]);
+  const originRef = useRef(null);
+  const destRef = useRef(null);
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
+  const [routeAnalysis, setRouteAnalysis] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [originSearchTerm, setOriginSearchTerm] = useState("");
+  const [destSearchTerm, setDestSearchTerm] = useState("");
+  const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
+  const [showDestSuggestions, setShowDestSuggestions] = useState(false);
+  const [showIntermediateStops, setShowIntermediateStops] = useState(false);
+  const [tripAnalysisCollapsed, setTripAnalysisCollapsed] = useState(false);
 
   const [agencies, setAgencies] = useState({
     cmrl: {
@@ -88,11 +108,12 @@ const MapComponent = () => {
         agencyActive && labelsOn ? "visible" : "none",
       );
     }
+    // Handle route labels - only show if requested, but user specifically asked for them to be hidden
     if (map.current.getLayer(`${key}-route-label-layer`)) {
       map.current.setLayoutProperty(
         `${key}-route-label-layer`,
         "visibility",
-        agencyActive && labelsOn ? "visible" : "none",
+        "none", // Permanently hidden as per user request
       );
     }
   };
@@ -107,33 +128,42 @@ const MapComponent = () => {
       );
       const data = await response.json();
 
-      if (key === "cmrl") {
-        const stops = data.features
-          .filter((f) => f.properties.feature_type?.toLowerCase() === "stop")
-          .map((f) => ({
-            name: f.properties.stop_name || `Station ${f.properties.fid}`,
-            coords: f.geometry.coordinates,
-            fid: f.properties.fid,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name));
-        setCmrlStops(stops);
-      }
+      const stops = data.features
+        .filter((f) => f.properties.feature_type?.toLowerCase() === "stop")
+        .map((f) => ({
+          name:
+            f.properties.stop_name ||
+            `Stop ${f.properties.stop_id || f.properties.fid}`,
+          coords: f.geometry.coordinates,
+          stop_id: f.properties.stop_id || f.properties.fid,
+          agency: key,
+        }));
+
+      setAllStops((prev) => {
+        const newStops = [...prev, ...stops];
+        const unique = Array.from(
+          new Map(newStops.map((s) => [s.name, s])).values(),
+        );
+        return unique.sort((a, b) => a.name.localeCompare(b.name));
+      });
 
       map.current.addSource(key, {
         type: "geojson",
         data: data,
-        promoteId: "fid",
+        promoteId: key === "cmrl" ? "stop_id" : "fid",
       });
 
       const routeColor =
         key === "cmrl"
           ? [
-              "match",
-              ["get", "route_color"],
-              "#000092",
-              "#000092",
-              "#00A700",
-              "#00A700",
+              "case",
+              ["has", "route_color"],
+              [
+                "case",
+                ["==", ["slice", ["get", "route_color"], 0, 1], "#"],
+                ["get", "route_color"],
+                ["concat", "#", ["get", "route_color"]],
+              ],
               agency.color,
             ]
           : agency.color;
@@ -272,10 +302,15 @@ const MapComponent = () => {
     });
   };
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     if (!source || !destination || !map.current) return;
-    const startStation = cmrlStops.find((s) => s.name === source);
-    const endStation = cmrlStops.find((s) => s.name === destination);
+
+    setSearching(true);
+    setRouteAnalysis(null);
+    setTripAnalysisCollapsed(false);
+
+    const startStation = allStops.find((s) => s.name === source);
+    const endStation = allStops.find((s) => s.name === destination);
 
     if (startStation && endStation) {
       const bounds = new maplibregl.LngLatBounds()
@@ -287,8 +322,132 @@ const MapComponent = () => {
         duration: 2000,
         pitch: 45,
       });
+
+      try {
+        const response = await fetch(
+          `http://localhost:3000/v1/api/route-analysis?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`,
+        );
+        const data = await response.json();
+        console.log(data);
+
+        if (response.ok) {
+          setRouteAnalysis(data);
+
+          if (map.current.getSource("highlighted-source")) {
+            map.current.getSource("highlighted-source").setData({
+              type: "FeatureCollection",
+              features: [
+                {
+                  type: "Feature",
+                  geometry: {
+                    type: "Point",
+                    coordinates: startStation.coords,
+                  },
+                  properties: { name: source },
+                },
+              ],
+            });
+          }
+
+          if (map.current.getSource("highlighted-destination")) {
+            map.current.getSource("highlighted-destination").setData({
+              type: "FeatureCollection",
+              features: [
+                {
+                  type: "Feature",
+                  geometry: {
+                    type: "Point",
+                    coordinates: endStation.coords,
+                  },
+                  properties: { name: destination },
+                },
+              ],
+            });
+          }
+
+          if (
+            data.intermediate_stops &&
+            data.intermediate_stops.length > 0 &&
+            map.current.getSource("highlighted-intermediate")
+          ) {
+            const intermediateFeatures = data.intermediate_stops
+              .map((stopName) => {
+                const stop = allStops.find((s) => s.name === stopName);
+                if (stop) {
+                  return {
+                    type: "Feature",
+                    geometry: {
+                      type: "Point",
+                      coordinates: stop.coords,
+                    },
+                    properties: { name: stopName },
+                  };
+                }
+                return null;
+              })
+              .filter((f) => f !== null);
+
+            map.current.getSource("highlighted-intermediate").setData({
+              type: "FeatureCollection",
+              features: intermediateFeatures,
+            });
+          }
+        } else {
+          console.error("Analysis failed:", data.error);
+        }
+      } catch (err) {
+        console.error("Search error:", err);
+      } finally {
+        setSearching(false);
+      }
+    } else {
+      setSearching(false);
     }
   };
+
+  const handleReset = () => {
+    setSource("");
+    setDestination("");
+    setOriginSearchTerm("");
+    setDestSearchTerm("");
+    setRouteAnalysis(null);
+    setShowOriginSuggestions(false);
+    setShowDestSuggestions(false);
+    setTripAnalysisCollapsed(false);
+    setShowIntermediateStops(false);
+
+    if (map.current && map.current.getSource("highlighted-source")) {
+      map.current.getSource("highlighted-source").setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+    if (map.current && map.current.getSource("highlighted-destination")) {
+      map.current.getSource("highlighted-destination").setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+    if (map.current && map.current.getSource("highlighted-intermediate")) {
+      map.current.getSource("highlighted-intermediate").setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (originRef.current && !originRef.current.contains(event.target)) {
+        setShowOriginSuggestions(false);
+      }
+      if (destRef.current && !destRef.current.contains(event.target)) {
+        setShowDestSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     map.current = new maplibregl.Map({
@@ -321,14 +480,59 @@ const MapComponent = () => {
           "fill-extrusion-opacity": 0.6,
         },
       });
+      map.current.addSource("highlighted-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.current.addLayer({
+        id: "highlighted-source-layer",
+        type: "circle",
+        source: "highlighted-source",
+        paint: {
+          "circle-radius": 12,
+          "circle-color": "#22c55e",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+      map.current.addSource("highlighted-destination", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.current.addLayer({
+        id: "highlighted-destination-layer",
+        type: "circle",
+        source: "highlighted-destination",
+        paint: {
+          "circle-radius": 12,
+          "circle-color": "#ef4444",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
 
+      map.current.addSource("highlighted-intermediate", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.current.addLayer({
+        id: "highlighted-intermediate-layer",
+        type: "circle",
+        source: "highlighted-intermediate",
+        paint: {
+          "circle-radius": 10,
+          "circle-color": "#f59e0b",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
       map.current.addControl(
         new maplibregl.NavigationControl({
           visualizePitch: true,
           showZoom: true,
           showCompass: true,
         }),
-        "bottom-right",
+        "top-right",
       );
 
       loadAndToggle("cmrl", true);
@@ -373,7 +577,11 @@ const MapComponent = () => {
   return (
     <div
       className="w-100 bg-light"
-      style={{ height: "calc(100vh - 64px)", position: "relative" }}
+      style={{
+        height: "calc(100vh - 64px)",
+        position: "relative",
+        "--nav-offset": rightPanelCollapsed ? "64px" : "336px",
+      }}
     >
       {/* LEFT PANEL: AGENCY CONTROLS */}
       <div
@@ -558,69 +766,416 @@ const MapComponent = () => {
           {!rightPanelCollapsed && (
             <div className="card-body p-3">
               <div className="vstack gap-3">
-                <div className="position-relative">
+                {/* Origin Searchable Dropdown */}
+                <div className="position-relative" ref={originRef}>
                   <div className="d-flex align-items-center mb-2">
                     <label className="small fw-bold text-muted text-uppercase m-0 tracking-tighter">
                       Origin Stop
                     </label>
                   </div>
-                  <select
-                    className="form-select ux-form-select bg-light border-0 rounded-3 shadow-none p-2 ps-3"
-                    value={source}
-                    onChange={(e) => setSource(e.target.value)}
-                    style={{ fontSize: "0.85rem" }}
-                  >
-                    <option value="">Select Source...</option>
-                    {cmrlStops.map((s) => (
-                      <option key={s.fid} value={s.name}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="input-group input-group-sm ux-search-group">
+                    <span className="input-group-text bg-light border-0 rounded-start-3">
+                      <Search size={14} className="text-[#1a2caa]" />
+                    </span>
+                    <input
+                      type="text"
+                      className="form-control bg-light border-0 shadow-none p-2"
+                      placeholder="Type or select Origin..."
+                      value={source || originSearchTerm}
+                      onChange={(e) => {
+                        setOriginSearchTerm(e.target.value);
+                        setSource("");
+                        setShowOriginSuggestions(true);
+                        setRouteAnalysis(null);
+                      }}
+                      onFocus={() => setShowOriginSuggestions(true)}
+                      style={{ fontSize: "0.85rem" }}
+                    />
+                    <span
+                      className="input-group-text bg-light border-0 rounded-end-3 cursor-pointer"
+                      onClick={() =>
+                        setShowOriginSuggestions(!showOriginSuggestions)
+                      }
+                    >
+                      <ChevronDown size={14} className="text-secondary" />
+                    </span>
+                  </div>
+                  {showOriginSuggestions && allStops.length > 0 && (
+                    <ul
+                      className="list-group position-absolute w-100 shadow-lg border-0 mt-1 rounded-3"
+                      style={{
+                        zIndex: 100,
+                        maxHeight: "200px",
+                        overflowY: "auto",
+                      }}
+                    >
+                      {allStops
+                        .filter((s) =>
+                          s.name
+                            .toLowerCase()
+                            .includes(originSearchTerm.toLowerCase()),
+                        )
+                        .slice(0, 50) // Performance: only show first 50 matches
+                        .map((s) => (
+                          <li
+                            key={s.stop_id}
+                            className="list-group-item list-group-item-action border-0 px-3 py-2 small cursor-pointer"
+                            onClick={() => {
+                              setSource(s.name);
+                              setOriginSearchTerm(s.name);
+                              setShowOriginSuggestions(false);
+                            }}
+                          >
+                            <div className="d-flex justify-content-between align-items-center">
+                              <span>{s.name}</span>
+                              <span
+                                className="badge rounded-pill bg-light text-dark extra-small text-uppercase opacity-50"
+                                style={{ fontSize: "0.6rem" }}
+                              >
+                                {s.agency}
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
                 </div>
 
-                <div className="position-relative">
+                <div className="position-relative" ref={destRef}>
                   <div className="d-flex align-items-center mb-2">
                     <label className="small fw-bold text-muted text-uppercase m-0 tracking-tighter">
                       Destination Stop
                     </label>
                   </div>
-                  <select
-                    className="form-select ux-form-select bg-light border-0 rounded-3 shadow-none p-2 ps-3"
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                    style={{ fontSize: "0.85rem" }}
-                  >
-                    <option value="">Select Destination...</option>
-                    {cmrlStops.map((s) => (
-                      <option key={s.fid} value={s.name}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="input-group input-group-sm ux-search-group">
+                    <span className="input-group-text bg-light border-0 rounded-start-3">
+                      <Search size={14} className="text-[#1a2caa]" />
+                    </span>
+                    <input
+                      type="text"
+                      className="form-control bg-light border-0 shadow-none p-2"
+                      placeholder="Type or select Destination..."
+                      value={destination || destSearchTerm}
+                      onChange={(e) => {
+                        setDestSearchTerm(e.target.value);
+                        setDestination("");
+                        setShowDestSuggestions(true);
+                        setRouteAnalysis(null);
+                      }}
+                      onFocus={() => setShowDestSuggestions(true)}
+                      style={{ fontSize: "0.85rem" }}
+                    />
+                    <span
+                      className="input-group-text bg-light border-0 rounded-end-3 cursor-pointer"
+                      onClick={() =>
+                        setShowDestSuggestions(!showDestSuggestions)
+                      }
+                    >
+                      <ChevronDown size={14} className="text-secondary" />
+                    </span>
+                  </div>
+                  {showDestSuggestions && allStops.length > 0 && (
+                    <ul
+                      className="list-group position-absolute w-100 shadow-lg border-0 mt-1 rounded-3"
+                      style={{
+                        zIndex: 100,
+                        maxHeight: "200px",
+                        overflowY: "auto",
+                      }}
+                    >
+                      {allStops
+                        .filter((s) =>
+                          s.name
+                            .toLowerCase()
+                            .includes(destSearchTerm.toLowerCase()),
+                        )
+                        .slice(0, 50)
+                        .map((s) => (
+                          <li
+                            key={s.stop_id}
+                            className="list-group-item list-group-item-action border-0 px-3 py-2 small cursor-pointer"
+                            onClick={() => {
+                              setDestination(s.name);
+                              setDestSearchTerm(s.name);
+                              setShowDestSuggestions(false);
+                            }}
+                          >
+                            <div className="d-flex justify-content-between align-items-center">
+                              <span>{s.name}</span>
+                              <span
+                                className="badge rounded-pill bg-light text-dark extra-small text-uppercase opacity-50"
+                                style={{ fontSize: "0.6rem" }}
+                              >
+                                {s.agency}
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
                 </div>
+                <div className="flex flex-row gap-2 w-full mt-2">
+                  <button
+                    className="btn ux-btn-primary rounded-3 fw-bold text-white shadow-sm d-flex align-items-center justify-content-center gap-2 transition-all hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-1"
+                    onClick={handleSearch}
+                    disabled={!source || !destination || searching}
+                    style={{
+                      backgroundColor: "#1a2caa",
+                      border: "none",
+                      height: "42px",
+                      letterSpacing: "0.3px",
+                    }}
+                  >
+                    {searching ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Navigation2 size={18} />
+                    )}
+                    <span>{searching ? "Analyzing..." : "Find Route"}</span>
+                  </button>
 
-                <button
-                  className="btn btn-primary w-100 rounded-3 fw-bold py-2 shadow-sm text-uppercase d-flex align-items-center justify-content-center transition-all hover-shadow mt-2"
-                  style={{
-                    backgroundColor: "#1a2caa",
-                    borderColor: "#1a2caa",
-                    letterSpacing: "0.5px",
-                  }}
-                  onClick={handleSearch}
-                >
-                  <Search size={16} className="me-2" /> Find Route
-                </button>
+                  <button
+                    className="btn rounded-3 fw-semibold shadow-sm d-flex align-items-center justify-content-center gap-2 transition-all hover:bg-light focus:outline-none focus:ring-2 focus:ring-offset-1"
+                    onClick={handleReset}
+                    style={{
+                      fontSize: "0.85rem",
+                      border: "1px dashed #ccc",
+                      color: "#555",
+                      backgroundColor: "#fff",
+                      height: "42px",
+                    }}
+                  >
+                    <RotateCcw size={16} />
+                    <span>Reset</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* BOTTOM RIGHT: LEGEND (to the left of NavigationControl) */}
+      {/* TRIP ANALYSIS FLOATING CARD - Horizontal sliding toggle */}
+      {routeAnalysis && (
+        <div
+          className="position-absolute m-3 animate animate-fade-in shadow-lg transition-all duration-300"
+          style={{
+            bottom: 0,
+            right: 0,
+            zIndex: 10,
+            width: tripAnalysisCollapsed ? "48px" : "320px",
+            height: tripAnalysisCollapsed ? "48px" : "auto",
+          }}
+        >
+          <div className="card border-0 bg-white rounded-4 overflow-hidden h-100">
+            <div
+              className={`card-header bg-[#1a2caa] text-white py-2 px-3 border-0 d-flex align-items-center justify-content-between ${tripAnalysisCollapsed ? "h-100 p-0 justify-content-center" : ""}`}
+            >
+              <div
+                className="d-flex align-items-center flex-grow-1 cursor-pointer"
+                onClick={() =>
+                  tripAnalysisCollapsed && setTripAnalysisCollapsed(false)
+                }
+                title={tripAnalysisCollapsed ? "Trip Analysis" : ""}
+              >
+                <History
+                  size={16}
+                  className="text-[#1a2caa] me-2 flex-shrink-0"
+                />
+                {!tripAnalysisCollapsed && (
+                  <h6 className="mb-0 text-[#1a2caa] fw-bold text-uppercase small tracking-widest">
+                    Trip Analysis
+                  </h6>
+                )}
+              </div>
+
+              <div className="d-flex align-items-center gap-2">
+                {!tripAnalysisCollapsed && (
+                  <button
+                    className="btn btn-close shadow-none small me-2 opacity-45"
+                    style={{ fontSize: "0.3rem" }}
+                    onClick={() => setRouteAnalysis(null)}
+                  ></button>
+                )}
+                <button
+                  className="btn btn-link p-0 text-gray-400 shadow-none border-0"
+                  onClick={() =>
+                    setTripAnalysisCollapsed(!tripAnalysisCollapsed)
+                  }
+                >
+                  {tripAnalysisCollapsed ? (
+                    <ChevronLeft size={18} />
+                  ) : (
+                    <ChevronRight size={18} />
+                  )}
+                </button>
+              </div>
+            </div>
+            {!tripAnalysisCollapsed && (
+              <div
+                className="card-body p-3 scroll-modern"
+                style={{ maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}
+              >
+                <div className="mb-3">
+                  <div className="d-flex align-items-center gap-2 mb-1">
+                    <div
+                      className="rounded-circle bg-[#1a2caa] opacity-10"
+                      style={{ width: "8px", height: "8px" }}
+                    ></div>
+                    <span className="extra-small text-muted fw-bold text-uppercase">
+                      From
+                    </span>
+                    <span className="small fw-bold">{source}</span>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      className="rounded-circle bg-[#1a2caa] opacity-10"
+                      style={{ width: "8px", height: "8px" }}
+                    ></div>
+                    <span className="extra-small text-muted fw-bold text-uppercase">
+                      To
+                    </span>
+                    <span className="small fw-bold ps-4">{destination}</span>
+                  </div>
+                </div>
+
+                <div className="row g-2 mb-3">
+                  <div className="col-4">
+                    <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
+                      <div className="text-muted extra-small text-uppercase">
+                        Time
+                      </div>
+                      <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                        {routeAnalysis.duration_minutes || "--"}
+                        <span className="ms-1" style={{ fontSize: "0.65rem" }}>
+                          min
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-4">
+                    <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
+                      <div className="text-muted extra-small text-uppercase">
+                        Stops
+                      </div>
+                      <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                        {routeAnalysis.stops_count || "0"}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-4">
+                    <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
+                      <div className="text-muted extra-small text-uppercase">
+                        Dist.
+                      </div>
+                      <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                        {routeAnalysis.direct_distance_km
+                          ? parseFloat(
+                              routeAnalysis.direct_distance_km,
+                            ).toFixed(1)
+                          : "--"}
+                        <span className="ms-1" style={{ fontSize: "0.65rem" }}>
+                          km
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className="bg-white p-3 rounded-3 shadow-sm mb-2 border border-2"
+                  style={{
+                    borderColor: "#bfdbfe",
+                  }}
+                >
+                  <div className="d-flex align-items-center justify-content-between mb-2">
+                    <div className="d-flex align-items-center gap-2">
+                      <Milestone size={14} className="text-muted" />
+                      <span className="small fw-bold text-muted">
+                        Route Details
+                      </span>
+                    </div>
+                    <span
+                      className="badge extra-small border"
+                      style={{
+                        backgroundColor: "#eef2ff",
+                        color: "#1a2caa",
+                        borderColor: "#c7d2fe",
+                      }}
+                    >
+                      {routeAnalysis.route_id}
+                    </span>
+                  </div>
+                  <div className="h6 text-[#1a2caa] fw-black text-uppercase mb-1">
+                    {routeAnalysis.route_long_name}
+                  </div>
+                  <div className="small text-muted d-flex align-items-center gap-1">
+                    <MapIcon size={12} />
+                    <span>
+                      Towards {routeAnalysis.trip_headsign || "Destination"}
+                    </span>
+                  </div>
+                </div>
+
+                {routeAnalysis.intermediate_stops?.length > 0 && (
+                  <div className="mt-3">
+                    <button
+                      className="btn btn-sm btn-link p-0 text-muted shadow-none d-flex align-items-center gap-1 w-100 justify-content-between"
+                      onClick={() =>
+                        setShowIntermediateStops(!showIntermediateStops)
+                      }
+                    >
+                      <span className="text-uppercase small fw-bold tracking-tighter">
+                        Intermediate Stops
+                      </span>
+                      <div className="d-flex align-items-center gap-1">
+                        <span className="extra-small opacity-50">
+                          {routeAnalysis.intermediate_stops.length} stops
+                        </span>
+                        <ChevronRight
+                          size={14}
+                          style={{
+                            transform: showIntermediateStops
+                              ? "rotate(90deg)"
+                              : "none",
+                            transition: "transform 0.2s",
+                          }}
+                        />
+                      </div>
+                    </button>
+                    {showIntermediateStops && (
+                      <div className="mt-2 animate animate-fade-in">
+                        <div className="vstack gap-2 border-start ms-2 ps-3">
+                          {routeAnalysis.intermediate_stops.map((stop, idx) => (
+                            <div
+                              key={idx}
+                              className="small text-muted position-relative"
+                            >
+                              <div
+                                className="position-absolute start-0 top-50 translate-middle-x bg-light rounded-circle"
+                                style={{
+                                  width: "6px",
+                                  height: "6px",
+                                  marginLeft: "-15px",
+                                }}
+                              ></div>
+                              {stop}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div
         className="position-absolute m-3"
-        style={{ bottom: 0, right: "50px", zIndex: 10, width: "220px" }}
+        style={{ bottom: 0, left: 0, zIndex: 10, width: "220px" }}
       >
         <div className="card shadow-sm border-0 rounded-4 overflow-hidden">
           <div className="card-header bg-white border-bottom p-2 px-3">
@@ -739,6 +1294,12 @@ const MapComponent = () => {
         }
         .scroll-modern::-webkit-scrollbar-thumb:hover {
           background: #aaa;
+        }
+
+         .maplibregl-ctrl-top-right {
+          right: var(--nav-offset) !important;
+          transition: right 0.3s ease-in-out;
+          margin-top: 16px !important;
         }
       `}</style>
     </div>
