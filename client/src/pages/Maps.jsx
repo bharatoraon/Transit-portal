@@ -124,7 +124,7 @@ const MapComponent = () => {
 
     try {
       const response = await fetch(
-        `http://localhost:3000/v1/api/layers/${agency.table}`,
+        `https://transitdata-hub-chennai.onrender.com/v1/api/layers/${agency.table}`,
       );
       const data = await response.json();
 
@@ -325,7 +325,7 @@ const MapComponent = () => {
 
       try {
         const response = await fetch(
-          `http://localhost:3000/v1/api/route-analysis?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`,
+          `https://transitdata-hub-chennai.onrender.com/v1/api/route-analysis?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`,
         );
         const data = await response.json();
         console.log(data);
