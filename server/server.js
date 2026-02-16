@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(
   cors({
-    origin: "http://localhost:5174",
+    origin: "https://transitdata-hub-chennai.vercel.app/",
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
     credentials: true,
   }),
