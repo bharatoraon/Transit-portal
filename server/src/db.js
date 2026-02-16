@@ -8,6 +8,9 @@ export const pool = new Pool({
   database: process.env.DB_NAME || "TransitDB",
   password: process.env.DB_PASSWORD || "postgres",
   port: process.env.DB_PORT || 5432,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 
 export default pool;
