@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { animate } from "framer-motion";
 import { Link } from "react-router-dom";
-import {ArrowRight} from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 
 const RollingNumber = ({ value }) => {
@@ -24,7 +24,7 @@ let cachedStats = null;
 const HomePage = () => {
   const [stats, setStats] = useState(
     cachedStats || {
-      routes: 842, 
+      routes: 842,
       stops: 3521,
       agencies: 3,
     },
@@ -32,7 +32,6 @@ const HomePage = () => {
   const [loading, setLoading] = useState(!cachedStats);
 
   useEffect(() => {
-    
     if (cachedStats) {
       setLoading(false);
       return;
@@ -40,10 +39,12 @@ const HomePage = () => {
 
     const fetchStats = async () => {
       try {
-        const response = await fetch("https://transitdata-hub-chennai.onrender.com:3000/v1/api/stats");
+        const apiBase =
+          import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/v1";
+        const response = await fetch(`${apiBase}/api/stats`);
         if (!response.ok) throw new Error("Failed to fetch stats");
         const data = await response.json();
-        cachedStats = data; 
+        cachedStats = data;
         setStats(data);
       } catch (err) {
         console.error("Error fetching stats:", err);

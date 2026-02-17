@@ -123,9 +123,9 @@ const MapComponent = () => {
     if (map.current.getSource(key)) return;
 
     try {
-      const response = await fetch(
-        `https://transitdata-hub-chennai.onrender.com/v1/api/layers/${agency.table}`,
-      );
+      const apiBase =
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/v1";
+      const response = await fetch(`${apiBase}/api/layers/${agency.table}`);
       const data = await response.json();
 
       const stops = data.features
@@ -313,25 +313,50 @@ const MapComponent = () => {
     const endStation = allStops.find((s) => s.name === destination);
 
     if (startStation && endStation) {
-      const bounds = new maplibregl.LngLatBounds()
+      // Default zoom for direct route
+      let fitBoundsZoom = 15;
+      let fitBoundsPadding = 100;
+      let fitBoundsDuration = 2000;
+      let fitBoundsPitch = 45;
+      let isTransfer = false;
+
+      // We'll determine transfer after fetching route analysis
+      let bounds = new maplibregl.LngLatBounds()
         .extend(startStation.coords)
         .extend(endStation.coords);
-      map.current.fitBounds(bounds, {
-        padding: 100,
-        maxZoom: 15,
-        duration: 2000,
-        pitch: 45,
-      });
 
       try {
+        const apiBase =
+          import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/v1";
         const response = await fetch(
-          `https://transitdata-hub-chennai.onrender.com/v1/api/route-analysis?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`,
+          `${apiBase}/api/route-analysis?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`,
         );
         const data = await response.json();
         console.log(data);
 
         if (response.ok) {
           setRouteAnalysis(data);
+
+          if (data.transfer) {
+            isTransfer = true;
+            fitBoundsZoom = 12;
+          }
+
+          if (data.exchange_point) {
+            const exchangeStop = allStops.find(
+              (s) => s.name === data.exchange_point,
+            );
+            if (exchangeStop) {
+              bounds = bounds.extend(exchangeStop.coords);
+            }
+          }
+
+          map.current.fitBounds(bounds, {
+            padding: fitBoundsPadding,
+            maxZoom: fitBoundsZoom,
+            duration: fitBoundsDuration,
+            pitch: fitBoundsPitch,
+          });
 
           if (map.current.getSource("highlighted-source")) {
             map.current.getSource("highlighted-source").setData({
@@ -365,12 +390,38 @@ const MapComponent = () => {
             });
           }
 
-          if (
-            data.intermediate_stops &&
-            data.intermediate_stops.length > 0 &&
-            map.current.getSource("highlighted-intermediate")
-          ) {
-            const intermediateFeatures = data.intermediate_stops
+          // Highlight intermediate stops for all segments
+          let allIntermediateStops = [];
+          if (data.segments) {
+            data.segments.forEach((seg) => {
+              if (seg.intermediate_stops && seg.intermediate_stops.length > 0) {
+                allIntermediateStops = allIntermediateStops.concat(
+                  seg.intermediate_stops,
+                );
+              }
+            });
+          } else if (data.intermediate_stops) {
+            allIntermediateStops = data.intermediate_stops;
+          }
+          // Highlight exchange point if present
+          let exchangeFeature = null;
+          if (data.exchange_point) {
+            const exchangeStop = allStops.find(
+              (s) => s.name === data.exchange_point,
+            );
+            if (exchangeStop) {
+              exchangeFeature = {
+                type: "Feature",
+                geometry: {
+                  type: "Point",
+                  coordinates: exchangeStop.coords,
+                },
+                properties: { name: data.exchange_point },
+              };
+            }
+          }
+          if (map.current.getSource("highlighted-intermediate")) {
+            const intermediateFeatures = allIntermediateStops
               .map((stopName) => {
                 const stop = allStops.find((s) => s.name === stopName);
                 if (stop) {
@@ -386,11 +437,92 @@ const MapComponent = () => {
                 return null;
               })
               .filter((f) => f !== null);
-
+            let features = intermediateFeatures;
+            if (exchangeFeature) {
+              features = [
+                ...features,
+                {
+                  ...exchangeFeature,
+                  properties: {
+                    ...exchangeFeature.properties,
+                    isExchange: true,
+                  },
+                },
+              ];
+            }
             map.current.getSource("highlighted-intermediate").setData({
               type: "FeatureCollection",
-              features: intermediateFeatures,
+              features,
             });
+          }
+
+          let routeLineFeatures = [];
+          if (data.segments && data.segments.length > 0) {
+            data.segments.forEach((seg) => {
+              Object.keys(agencies).forEach((agencyKey) => {
+                const src = map.current.getSource(agencyKey);
+                if (src && src._data && src._data.features) {
+                  const match = src._data.features.find(
+                    (f) =>
+                      f.properties &&
+                      f.properties.route_id &&
+                      String(f.properties.route_id) === String(seg.route_id) &&
+                      f.geometry.type === "LineString",
+                  );
+                  if (match) {
+                    routeLineFeatures.push(match);
+                  }
+                }
+              });
+            });
+          }
+          routeLineFeatures = routeLineFeatures.filter(
+            (f, idx, arr) =>
+              arr.findIndex(
+                (o) =>
+                  JSON.stringify(o.geometry.coordinates) ===
+                  JSON.stringify(f.geometry.coordinates),
+              ) === idx,
+          );
+          if (!map.current.getSource("highlighted-route")) {
+            map.current.addSource("highlighted-route", {
+              type: "geojson",
+              data: {
+                type:
+                  routeLineFeatures.length > 1
+                    ? "FeatureCollection"
+                    : "Feature",
+                features: routeLineFeatures,
+              },
+            });
+            map.current.addLayer({
+              id: "highlighted-route-layer",
+              type: "line",
+              source: "highlighted-route",
+              paint: {
+                "line-color": "#f43f5e",
+                "line-width": 12,
+                "line-opacity": 0.92,
+              },
+            });
+          } else {
+            map.current.getSource("highlighted-route").setData({
+              type:
+                routeLineFeatures.length > 1 ? "FeatureCollection" : "Feature",
+              features: routeLineFeatures,
+            });
+            if (map.current.getLayer("highlighted-route-layer")) {
+              map.current.setPaintProperty(
+                "highlighted-route-layer",
+                "line-width",
+                12,
+              );
+              map.current.setPaintProperty(
+                "highlighted-route-layer",
+                "line-opacity",
+                0.92,
+              );
+            }
           }
         } else {
           console.error("Analysis failed:", data.error);
@@ -722,7 +854,7 @@ const MapComponent = () => {
 
       {/* RIGHT PANEL: ROUTE FINDER */}
       <div
-        className="position-absolute m-3 transition-all duration-300"
+        className="position-absolute p-1 transition-all duration-300"
         style={{
           top: 0,
           right: 0,
@@ -766,7 +898,6 @@ const MapComponent = () => {
           {!rightPanelCollapsed && (
             <div className="card-body p-3">
               <div className="vstack gap-3">
-                {/* Origin Searchable Dropdown */}
                 <div className="position-relative" ref={originRef}>
                   <div className="d-flex align-items-center mb-2">
                     <label className="small fw-bold text-muted text-uppercase m-0 tracking-tighter">
@@ -958,16 +1089,18 @@ const MapComponent = () => {
       {/* TRIP ANALYSIS FLOATING CARD - Horizontal sliding toggle */}
       {routeAnalysis && (
         <div
-          className="position-absolute m-3 animate animate-fade-in shadow-lg transition-all duration-300"
+          className="position-absolute p-1 animate animate-fade-in shadow-lg transition-all duration-300"
           style={{
             bottom: 0,
             right: 0,
             zIndex: 10,
             width: tripAnalysisCollapsed ? "48px" : "320px",
-            height: tripAnalysisCollapsed ? "48px" : "auto",
+            height: tripAnalysisCollapsed ? "48px" : "405px", // Match Route Finder height
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <div className="card border-0 bg-white rounded-4 overflow-hidden h-100">
+          <div className="card border-0 bg-white rounded-4 overflow-hidden h-100 d-flex flex-column">
             <div
               className={`card-header bg-[#1a2caa] text-white py-2 px-3 border-0 d-flex align-items-center justify-content-between ${tripAnalysisCollapsed ? "h-100 p-0 justify-content-center" : ""}`}
             >
@@ -1013,8 +1146,12 @@ const MapComponent = () => {
             </div>
             {!tripAnalysisCollapsed && (
               <div
-                className="card-body p-3 scroll-modern"
-                style={{ maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}
+                className="card-body p-3 scroll-modern flex-grow-1"
+                style={{
+                  overflowY: "auto",
+                  maxHeight: "calc(420px - 56px)", // 420px minus header height
+                  minHeight: 0,
+                }}
               >
                 <div className="mb-3">
                   <div className="d-flex align-items-center gap-2 mb-1">
@@ -1046,7 +1183,7 @@ const MapComponent = () => {
                         Time
                       </div>
                       <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                        {routeAnalysis.duration_minutes || "--"}
+                        {routeAnalysis.total_duration_minutes || "--"}
                         <span className="ms-1" style={{ fontSize: "0.65rem" }}>
                           min
                         </span>
@@ -1059,114 +1196,160 @@ const MapComponent = () => {
                         Stops
                       </div>
                       <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                        {routeAnalysis.stops_count || "0"}
+                        {routeAnalysis.total_stops || "0"}
                       </div>
                     </div>
                   </div>
                   <div className="col-4">
                     <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
                       <div className="text-muted extra-small text-uppercase">
-                        Dist.
+                        Transfer
                       </div>
                       <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                        {routeAnalysis.direct_distance_km
-                          ? parseFloat(
-                              routeAnalysis.direct_distance_km,
-                            ).toFixed(1)
-                          : "--"}
-                        <span className="ms-1" style={{ fontSize: "0.65rem" }}>
-                          km
-                        </span>
+                        {routeAnalysis.transfer ? "Yes" : "No"}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div
-                  className="bg-white p-3 rounded-3 shadow-sm mb-2 border border-2"
-                  style={{
-                    borderColor: "#bfdbfe",
-                  }}
-                >
-                  <div className="d-flex align-items-center justify-content-between mb-2">
-                    <div className="d-flex align-items-center gap-2">
-                      <Milestone size={14} className="text-muted" />
-                      <span className="small fw-bold text-muted">
-                        Route Details
-                      </span>
-                    </div>
-                    <span
-                      className="badge extra-small border"
-                      style={{
-                        backgroundColor: "#eef2ff",
-                        color: "#1a2caa",
-                        borderColor: "#c7d2fe",
-                      }}
-                    >
-                      {routeAnalysis.route_id}
+                {routeAnalysis.exchange_point && (
+                  <div className="mb-2">
+                    <span className="badge bg-warning text-dark px-2 py-1 rounded-pill">
+                      Exchange at: {routeAnalysis.exchange_point}
                     </span>
-                  </div>
-                  <div className="h6 text-[#1a2caa] fw-black text-uppercase mb-1">
-                    {routeAnalysis.route_long_name}
-                  </div>
-                  <div className="small text-muted d-flex align-items-center gap-1">
-                    <MapIcon size={12} />
-                    <span>
-                      Towards {routeAnalysis.trip_headsign || "Destination"}
-                    </span>
-                  </div>
-                </div>
-
-                {routeAnalysis.intermediate_stops?.length > 0 && (
-                  <div className="mt-3">
-                    <button
-                      className="btn btn-sm btn-link p-0 text-muted shadow-none d-flex align-items-center gap-1 w-100 justify-content-between"
-                      onClick={() =>
-                        setShowIntermediateStops(!showIntermediateStops)
-                      }
-                    >
-                      <span className="text-uppercase small fw-bold tracking-tighter">
-                        Intermediate Stops
-                      </span>
-                      <div className="d-flex align-items-center gap-1">
-                        <span className="extra-small opacity-50">
-                          {routeAnalysis.intermediate_stops.length} stops
-                        </span>
-                        <ChevronRight
-                          size={14}
-                          style={{
-                            transform: showIntermediateStops
-                              ? "rotate(90deg)"
-                              : "none",
-                            transition: "transform 0.2s",
-                          }}
-                        />
-                      </div>
-                    </button>
-                    {showIntermediateStops && (
-                      <div className="mt-2 animate animate-fade-in">
-                        <div className="vstack gap-2 border-start ms-2 ps-3">
-                          {routeAnalysis.intermediate_stops.map((stop, idx) => (
-                            <div
-                              key={idx}
-                              className="small text-muted position-relative"
-                            >
-                              <div
-                                className="position-absolute start-0 top-50 translate-middle-x bg-light rounded-circle"
-                                style={{
-                                  width: "6px",
-                                  height: "6px",
-                                  marginLeft: "-15px",
-                                }}
-                              ></div>
-                              {stop}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
+
+                {routeAnalysis.segments &&
+                  routeAnalysis.segments.map((seg, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white p-3 rounded-3 shadow-sm mb-2 border border-2"
+                      style={{ borderColor: "#bfdbfe" }}
+                    >
+                      <div className="d-flex align-items-center justify-content-between mb-2">
+                        <div className="d-flex align-items-center gap-2">
+                          <Milestone size={14} className="text-muted" />
+                          <span className="small fw-bold text-muted">
+                            Segment {idx + 1}: {seg.from} → {seg.to}
+                          </span>
+                        </div>
+                        <span
+                          className="badge extra-small border"
+                          style={{
+                            backgroundColor: "#eef2ff",
+                            color: "#1a2caa",
+                            borderColor: "#c7d2fe",
+                          }}
+                        >
+                          {seg.route_id}
+                        </span>
+                      </div>
+                      <div className="h6 text-[#1a2caa] fw-black text-uppercase mb-1">
+                        {seg.route_long_name}
+                      </div>
+                      <div className="small text-muted d-flex align-items-center gap-1 mb-1">
+                        <MapIcon size={12} />
+                        <span>
+                          Towards {seg.trip_headsign || "Destination"}
+                        </span>
+                      </div>
+                      <div className="row g-2 mb-1">
+                        <div className="col-4">
+                          <div className="text-muted extra-small text-uppercase">
+                            Time
+                          </div>
+                          <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                            {seg.duration_minutes || "--"}
+                            <span
+                              className="ms-1"
+                              style={{ fontSize: "0.65rem" }}
+                            >
+                              min
+                            </span>
+                          </div>
+                        </div>
+                        <div className="col-4">
+                          <div className="text-muted extra-small text-uppercase">
+                            Stops
+                          </div>
+                          <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                            {seg.stops_count || "0"}
+                          </div>
+                        </div>
+                        <div className="col-4">
+                          <div className="text-muted extra-small text-uppercase">
+                            Dist.
+                          </div>
+                          <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                            {seg.direct_distance_km
+                              ? parseFloat(seg.direct_distance_km).toFixed(1)
+                              : "--"}
+                            <span
+                              className="ms-1"
+                              style={{ fontSize: "0.65rem" }}
+                            >
+                              km
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      {seg.intermediate_stops &&
+                        seg.intermediate_stops.length > 0 && (
+                          <div className="mt-2 mb-3">
+                            <button
+                              className="btn btn-sm btn-link p-0 text-muted shadow-none d-flex align-items-center gap-1 w-100 justify-content-between"
+                              onClick={() =>
+                                setShowIntermediateStops(
+                                  showIntermediateStops === idx ? null : idx,
+                                )
+                              }
+                            >
+                              <span className="text-uppercase small fw-bold tracking-tighter">
+                                Intermediate Stops
+                              </span>
+                              <div className="d-flex align-items-center gap-1">
+                                <span className="extra-small opacity-50">
+                                  {seg.intermediate_stops.length} stops
+                                </span>
+                                <ChevronRight
+                                  size={14}
+                                  style={{
+                                    transform:
+                                      showIntermediateStops === idx
+                                        ? "rotate(90deg)"
+                                        : "none",
+                                    transition: "transform 0.2s",
+                                  }}
+                                />
+                              </div>
+                            </button>
+                            {showIntermediateStops === idx && (
+                              <div className="mt-2 animate animate-fade-in">
+                                <div className="vstack gap-2 border-start ms-2 ps-3">
+                                  {seg.intermediate_stops.map((stop, sidx) => (
+                                    <div
+                                      key={sidx}
+                                      className="small text-muted position-relative"
+                                    >
+                                      <div
+                                        className="position-absolute start-0 top-50 translate-middle-x bg-light rounded-circle"
+                                        style={{
+                                          width: "6px",
+                                          height: "6px",
+                                          marginLeft: "-15px",
+                                        }}
+                                      ></div>
+                                      {stop}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                    </div>
+                  ))}
               </div>
             )}
           </div>
@@ -1174,7 +1357,7 @@ const MapComponent = () => {
       )}
 
       <div
-        className="position-absolute m-3"
+        className="position-absolute m-3 mt-4"
         style={{ bottom: 0, left: 0, zIndex: 10, width: "220px" }}
       >
         <div className="card shadow-sm border-0 rounded-4 overflow-hidden">

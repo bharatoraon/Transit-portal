@@ -127,12 +127,13 @@ router.get("/api/layers/:tableName", async (req, res) => {
 router.get("/api/route-analysis", async (req, res) => {
   try {
     const { source, destination } = req.query;
-
     if (!source || !destination) {
-      return res.status(400).json({ error: "Source and destination are required" });
+      return res
+        .status(400)
+        .json({ error: "Source and destination are required" });
     }
 
-    const query = `
+    const directQuery = `
       WITH trip_match AS (
         SELECT 
           s.trip_id,
@@ -171,17 +172,10 @@ router.get("/api/route-analysis", async (req, res) => {
         ) as intermediate_stops
       FROM trip_match tm;
     `;
-
-    const result = await pool.query(query, [source, destination]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "No direct route found between these stops" });
-    }
-
-    const data = result.rows[0];
+    const directResult = await pool.query(directQuery, [source, destination]);
     const toSeconds = (t) => {
       if (!t) return 0;
-      if (typeof t === 'string' && t.includes(':')) {
+      if (typeof t === "string" && t.includes(":")) {
         const parts = t.split(":");
         const [h, m, s = 0] = parts.map(Number);
         return h * 3600 + m * 60 + s;
@@ -189,20 +183,123 @@ router.get("/api/route-analysis", async (req, res) => {
       if (t instanceof Date) {
         return t.getHours() * 3600 + t.getMinutes() * 60 + t.getSeconds();
       }
-      if (typeof t === 'object') {
+      if (typeof t === "object") {
         return (t.hours || 0) * 3600 + (t.minutes || 0) * 60 + (t.seconds || 0);
       }
       return 0;
     };
+    if (directResult.rows.length > 0) {
+      const data = directResult.rows[0];
+      const durationSeconds =
+        toSeconds(data.end_time) - toSeconds(data.start_time);
+      const durationMinutes = Math.round(durationSeconds / 60);
+      return res.json({
+        segments: [
+          {
+            from: source,
+            to: destination,
+            ...data,
+            duration_minutes: durationMinutes,
+            intermediate_stops: data.intermediate_stops || [],
+          },
+        ],
+        total_duration_minutes: durationMinutes,
+        total_stops: data.stops_count || 0,
+        transfer: false,
+        exchange_point: null,
+      });
+    }
 
-    const durationSeconds = toSeconds(data.end_time) - toSeconds(data.start_time);
-    const durationMinutes = Math.round(durationSeconds / 60);
+    
+    const sourceStopsQuery = `
+      SELECT DISTINCT d.stop_name
+      FROM gtfs_master_view s
+      JOIN gtfs_master_view d ON s.trip_id = d.trip_id
+      WHERE s.feature_type = 'stop' AND d.feature_type = 'stop'
+        AND s.stop_name = $1 AND d.stop_sequence > s.stop_sequence
+    `;
+    const sourceStopsResult = await pool.query(sourceStopsQuery, [source]);
+    const reachableFromSource = sourceStopsResult.rows.map((r) => r.stop_name);
 
-    res.json({
-      ...data,
-      duration_minutes: durationMinutes,
-      intermediate_stops: data.intermediate_stops || [],
-    });
+    const destStopsQuery = `
+      SELECT DISTINCT s.stop_name
+      FROM gtfs_master_view s
+      JOIN gtfs_master_view d ON s.trip_id = d.trip_id
+      WHERE s.feature_type = 'stop' AND d.feature_type = 'stop'
+        AND d.stop_name = $1 AND d.stop_sequence > s.stop_sequence
+    `;
+    const destStopsResult = await pool.query(destStopsQuery, [destination]);
+    const canReachDestination = destStopsResult.rows.map((r) => r.stop_name);
+
+  
+    const exchangePoints = reachableFromSource.filter(
+      (stop) =>
+        canReachDestination.includes(stop) &&
+        stop !== source &&
+        stop !== destination,
+    );
+    if (exchangePoints.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "No route found, even with one transfer." });
+    }
+
+    let bestRoute = null;
+    let minStops = Infinity;
+    for (const exchange of exchangePoints) {
+    
+      const firstLegResult = await pool.query(directQuery, [source, exchange]);
+     
+      const secondLegResult = await pool.query(directQuery, [
+        exchange,
+        destination,
+      ]);
+      if (firstLegResult.rows.length > 0 && secondLegResult.rows.length > 0) {
+        const firstLeg = firstLegResult.rows[0];
+        const secondLeg = secondLegResult.rows[0];
+        
+        const firstLegDuration =
+          toSeconds(firstLeg.end_time) - toSeconds(firstLeg.start_time);
+        const firstLegMinutes = Math.round(firstLegDuration / 60);
+        const secondLegDuration =
+          toSeconds(secondLeg.end_time) - toSeconds(secondLeg.start_time);
+        const secondLegMinutes = Math.round(secondLegDuration / 60);
+        const totalStops =
+          (firstLeg.stops_count || 0) + (secondLeg.stops_count || 0);
+        const totalMinutes = firstLegMinutes + secondLegMinutes;
+        if (totalStops < minStops) {
+          minStops = totalStops;
+          bestRoute = {
+            segments: [
+              {
+                from: source,
+                to: exchange,
+                ...firstLeg,
+                duration_minutes: firstLegMinutes,
+                intermediate_stops: firstLeg.intermediate_stops || [],
+              },
+              {
+                from: exchange,
+                to: destination,
+                ...secondLeg,
+                duration_minutes: secondLegMinutes,
+                intermediate_stops: secondLeg.intermediate_stops || [],
+              },
+            ],
+            total_duration_minutes: totalMinutes,
+            total_stops: totalStops,
+            transfer: true,
+            exchange_point: exchange,
+          };
+        }
+      }
+    }
+    if (bestRoute) {
+      return res.json(bestRoute);
+    }
+    return res
+      .status(404)
+      .json({ error: "No optimal route found with one transfer." });
   } catch (err) {
     console.error("Route Analysis Error:", err);
     res.status(500).json({ error: err.message });
