@@ -22,6 +22,7 @@ import {
   Minus,
   Compass,
 } from "lucide-react";
+import * as turf from "@turf/turf";
 
 const MapComponent = () => {
   const mapContainer = useRef(null);
@@ -29,6 +30,7 @@ const MapComponent = () => {
   const [loadingAgency, setLoadingAgency] = useState(null);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [legendCollapsed, setLegendCollapsed] = useState(false);
 
   // --- STATE FOR SEARCH & DROPDOWNS ---
   const [allStops, setAllStops] = useState([]);
@@ -43,7 +45,7 @@ const MapComponent = () => {
   const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
   const [showDestSuggestions, setShowDestSuggestions] = useState(false);
   const [showIntermediateStops, setShowIntermediateStops] = useState(false);
-  const [tripAnalysisCollapsed, setTripAnalysisCollapsed] = useState(false);
+
 
   const [agencies, setAgencies] = useState({
     cmrl: {
@@ -137,7 +139,49 @@ const MapComponent = () => {
           coords: f.geometry.coordinates,
           stop_id: f.properties.stop_id || f.properties.fid,
           agency: key,
+          rawFeature: f, // Keep raw feature for snapping
         }));
+
+      // Snap to line logic for Metro (CMRL)
+      if (key === "cmrl") {
+        const routes = data.features.filter(
+          (f) =>
+            f.properties.feature_type?.toLowerCase() === "route" &&
+            f.geometry.type === "LineString",
+        );
+
+        if (routes.length > 0) {
+          stops.forEach((stop) => {
+            const point = turf.point(stop.coords);
+            let nearestPoint = null;
+            let minDistance = Infinity;
+
+            routes.forEach((route) => {
+              const snapped = turf.nearestPointOnLine(route, point);
+              const distance = turf.distance(point, snapped);
+              if (distance < minDistance) {
+                minDistance = distance;
+                nearestPoint = snapped;
+              }
+            });
+
+            // If snapped point is reasonably close (e.g., within 500m), use it
+            if (nearestPoint && minDistance < 0.5) {
+              stop.coords = nearestPoint.geometry.coordinates;
+              // Update the original feature in 'data' so the source uses snapped coords
+              const originalFeature = data.features.find(
+                (f) =>
+                  f.properties.stop_id === stop.stop_id &&
+                  f.properties.feature_type === "stop",
+              );
+              if (originalFeature) {
+                originalFeature.geometry.coordinates =
+                  nearestPoint.geometry.coordinates;
+              }
+            }
+          });
+        }
+      }
 
       setAllStops((prev) => {
         const newStops = [...prev, ...stops];
@@ -156,16 +200,16 @@ const MapComponent = () => {
       const routeColor =
         key === "cmrl"
           ? [
+            "case",
+            ["has", "route_color"],
+            [
               "case",
-              ["has", "route_color"],
-              [
-                "case",
-                ["==", ["slice", ["get", "route_color"], 0, 1], "#"],
-                ["get", "route_color"],
-                ["concat", "#", ["get", "route_color"]],
-              ],
-              agency.color,
-            ]
+              ["==", ["slice", ["get", "route_color"], 0, 1], "#"],
+              ["get", "route_color"],
+              ["concat", "#", ["get", "route_color"]],
+            ],
+            agency.color,
+          ]
           : agency.color;
 
       map.current.addLayer({
@@ -188,9 +232,9 @@ const MapComponent = () => {
             10,
             2,
             14,
-            5,
+            6,
             18,
-            8,
+            10,
           ],
           "line-opacity": 0.85,
         },
@@ -307,7 +351,7 @@ const MapComponent = () => {
 
     setSearching(true);
     setRouteAnalysis(null);
-    setTripAnalysisCollapsed(false);
+
 
     const startStation = allStops.find((s) => s.name === source);
     const endStation = allStops.find((s) => s.name === destination);
@@ -545,7 +589,7 @@ const MapComponent = () => {
     setRouteAnalysis(null);
     setShowOriginSuggestions(false);
     setShowDestSuggestions(false);
-    setTripAnalysisCollapsed(false);
+
     setShowIntermediateStops(false);
 
     if (map.current && map.current.getSource("highlighted-source")) {
@@ -768,11 +812,10 @@ const MapComponent = () => {
                 {Object.keys(agencies).map((key) => (
                   <div
                     key={key}
-                    className={`p-4 rounded-2xl transition-all duration-200 border shadow-sm ${
-                      agencies[key].active
-                        ? "bg-white border-slate-200"
-                        : "bg-white border-slate-100 opacity-80"
-                    }`}
+                    className={`p-4 rounded-2xl transition-all duration-200 border shadow-sm ${agencies[key].active
+                      ? "bg-white border-slate-200"
+                      : "bg-white border-slate-100 opacity-80"
+                      }`}
                   >
                     {/* Header / Main Toggle */}
                     <div className="flex justify-between items-center">
@@ -854,7 +897,7 @@ const MapComponent = () => {
 
       {/* RIGHT PANEL: ROUTE FINDER */}
       <div
-        className="position-absolute p-1 transition-all duration-300"
+        className="position-absolute m-3 transition-all duration-300"
         style={{
           top: 0,
           right: 0,
@@ -863,7 +906,7 @@ const MapComponent = () => {
           height: rightPanelCollapsed ? "48px" : "auto",
         }}
       >
-        <div className="card shadow-lg border-0 rounded-4 overflow-hidden h-100">
+        <div className="card shadow-sm border-0 rounded-4 overflow-hidden h-100">
           <div className="card-header bg-white border-bottom p-0">
             <div className="d-flex align-items-center justify-content-between p-3">
               <div
@@ -878,7 +921,7 @@ const MapComponent = () => {
                   className="text-[#1a2caa] me-2 flex-shrink-0"
                 />
                 {!rightPanelCollapsed && (
-                  <h6 className="mb-0 fw-bold text-uppercase tracking-widest small text-muted">
+                  <h6 className="mb-0 fw-bold text-uppercase tracking-wider small text-muted">
                     Route Finder
                   </h6>
                 )}
@@ -896,7 +939,10 @@ const MapComponent = () => {
             </div>
           </div>
           {!rightPanelCollapsed && (
-            <div className="card-body p-3">
+            <div
+              className="card-body p-3 scroll-modern"
+              style={{ maxHeight: "calc(100vh - 140px)", overflowY: "auto", overflowX: "hidden" }}
+            >
               <div className="vstack gap-3">
                 <div className="position-relative" ref={originRef}>
                   <div className="d-flex align-items-center mb-2">
@@ -1080,6 +1126,200 @@ const MapComponent = () => {
                     <span>Reset</span>
                   </button>
                 </div>
+
+                {/* Embedded Trip Analysis */}
+                {routeAnalysis && (
+                  <div className="mt-3 animate animate-fade-in border-t pt-3">
+                    <div className="d-flex align-items-center justify-content-between mb-3">
+                      <h6 className="mb-0 text-[#1a2caa] fw-bold text-uppercase small tracking-widest d-flex align-items-center gap-2">
+                        <History size={16} />
+                        Trip Analysis
+                      </h6>
+                      <button
+                        className="btn btn-close shadow-none small opacity-50"
+                        style={{ fontSize: "0.5rem" }}
+                        onClick={() => setRouteAnalysis(null)}
+                      ></button>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="row g-2 mb-3">
+                        <div className="col-4">
+                          <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
+                            <div className="text-muted extra-small text-uppercase">
+                              Time
+                            </div>
+                            <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                              {routeAnalysis.total_duration_minutes || "--"}
+                              <span className="ms-1" style={{ fontSize: "0.65rem" }}>
+                                min
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-4">
+                          <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
+                            <div className="text-muted extra-small text-uppercase">
+                              Stops
+                            </div>
+                            <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                              {routeAnalysis.total_stops || "0"}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-4">
+                          <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
+                            <div className="text-muted extra-small text-uppercase">
+                              Transfer
+                            </div>
+                            <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                              {routeAnalysis.transfer ? "Yes" : "No"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {routeAnalysis.exchange_point && (
+                        <div className="mb-2">
+                          <span className="badge bg-warning text-dark px-2 py-1 rounded-pill">
+                            Exchange at: {routeAnalysis.exchange_point.includes("PURATCHI THALAIVAR") ? "MGR Central Metro" : routeAnalysis.exchange_point}
+                          </span>
+                        </div>
+                      )}
+
+                      {routeAnalysis.segments &&
+                        routeAnalysis.segments.map((seg, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-white p-3 rounded-3 shadow-sm mb-2 border border-2"
+                            style={{ borderColor: "#bfdbfe" }}
+                          >
+                            <div className="d-flex align-items-center justify-content-between mb-2">
+                              <div className="d-flex align-items-center gap-2">
+                                <Milestone size={14} className="text-muted" />
+                                <span className="small fw-bold text-muted">
+                                  Segment {idx + 1}: {seg.from} → {seg.to}
+                                </span>
+                              </div>
+                              <span
+                                className="badge extra-small border"
+                                style={{
+                                  backgroundColor: "#eef2ff",
+                                  color: "#1a2caa",
+                                  borderColor: "#c7d2fe",
+                                }}
+                              >
+                                {seg.route_id}
+                              </span>
+                            </div>
+                            <div className="h6 text-[#1a2caa] fw-black text-uppercase mb-1">
+                              {seg.route_long_name}
+                            </div>
+                            <div className="small text-muted d-flex align-items-center gap-1 mb-1">
+                              <MapIcon size={12} />
+                              <span>
+                                Towards {seg.trip_headsign || "Destination"}
+                              </span>
+                            </div>
+                            <div className="row g-2 mb-1">
+                              <div className="col-4">
+                                <div className="text-muted extra-small text-uppercase">
+                                  Time
+                                </div>
+                                <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                                  {seg.duration_minutes || "--"}
+                                  <span
+                                    className="ms-1"
+                                    style={{ fontSize: "0.65rem" }}
+                                  >
+                                    min
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="col-4">
+                                <div className="text-muted extra-small text-uppercase">
+                                  Stops
+                                </div>
+                                <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                                  {seg.stops_count || "0"}
+                                </div>
+                              </div>
+                              <div className="col-4">
+                                <div className="text-muted extra-small text-uppercase">
+                                  Dist.
+                                </div>
+                                <div className="fw-bold h6 mb-0 text-[#1a2caa]">
+                                  {seg.direct_distance_km
+                                    ? parseFloat(seg.direct_distance_km).toFixed(1)
+                                    : "--"}
+                                  <span
+                                    className="ms-1"
+                                    style={{ fontSize: "0.65rem" }}
+                                  >
+                                    km
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            {seg.intermediate_stops &&
+                              seg.intermediate_stops.length > 0 && (
+                                <div className="mt-2 mb-3">
+                                  <button
+                                    className="btn btn-sm btn-link p-0 text-muted shadow-none d-flex align-items-center gap-1 w-100 justify-content-between"
+                                    onClick={() =>
+                                      setShowIntermediateStops(
+                                        showIntermediateStops === idx ? null : idx,
+                                      )
+                                    }
+                                  >
+                                    <span className="text-uppercase small fw-bold tracking-tighter">
+                                      Intermediate Stops
+                                    </span>
+                                    <div className="d-flex align-items-center gap-1">
+                                      <span className="extra-small opacity-50">
+                                        {seg.intermediate_stops.length} stops
+                                      </span>
+                                      <ChevronRight
+                                        size={14}
+                                        style={{
+                                          transform:
+                                            showIntermediateStops === idx
+                                              ? "rotate(90deg)"
+                                              : "none",
+                                          transition: "transform 0.2s",
+                                        }}
+                                      />
+                                    </div>
+                                  </button>
+                                  {showIntermediateStops === idx && (
+                                    <div className="mt-2 animate animate-fade-in">
+                                      <div className="vstack gap-2 border-start ms-2 ps-3">
+                                        {seg.intermediate_stops.map((stop, sidx) => (
+                                          <div
+                                            key={sidx}
+                                            className="small text-muted position-relative"
+                                          >
+                                            <div
+                                              className="position-absolute start-0 top-50 translate-middle-x bg-light rounded-circle"
+                                              style={{
+                                                width: "6px",
+                                                height: "6px",
+                                                marginLeft: "-15px",
+                                              }}
+                                            ></div>
+                                            {stop}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1087,370 +1327,129 @@ const MapComponent = () => {
       </div>
 
       {/* TRIP ANALYSIS FLOATING CARD - Horizontal sliding toggle */}
-      {routeAnalysis && (
-        <div
-          className="position-absolute p-1 animate animate-fade-in shadow-lg transition-all duration-300"
-          style={{
-            bottom: 0,
-            right: 0,
-            zIndex: 10,
-            width: tripAnalysisCollapsed ? "48px" : "320px",
-            height: tripAnalysisCollapsed ? "48px" : "405px", // Match Route Finder height
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          <div className="card border-0 bg-white rounded-4 overflow-hidden h-100 d-flex flex-column">
+
+
+      <div
+        className="position-absolute m-3 mt-4 transition-all duration-300"
+        style={{
+          bottom: 0,
+          left: 0,
+          zIndex: 10,
+          width: legendCollapsed ? "48px" : "220px",
+          height: legendCollapsed ? "48px" : "auto",
+        }}
+      >
+        <div className="card shadow-sm border-0 rounded-4 overflow-hidden h-100">
+          <div className="card-header bg-white border-bottom p-0" style={{ height: legendCollapsed ? "100%" : "auto", borderBottom: legendCollapsed ? "none" : "inherit" }}>
             <div
-              className={`card-header bg-[#1a2caa] text-white py-2 px-3 border-0 d-flex align-items-center justify-content-between ${tripAnalysisCollapsed ? "h-100 p-0 justify-content-center" : ""}`}
+              className={`d-flex align-items-center ${legendCollapsed ? "justify-content-center h-100" : "justify-content-between p-2 px-3"}`}
             >
               <div
-                className="d-flex align-items-center flex-grow-1 cursor-pointer"
-                onClick={() =>
-                  tripAnalysisCollapsed && setTripAnalysisCollapsed(false)
-                }
-                title={tripAnalysisCollapsed ? "Trip Analysis" : ""}
+                className={`d-flex align-items-center ${legendCollapsed ? "justify-content-center w-100 h-100" : "flex-grow-1"} cursor-pointer`}
+                onClick={() => legendCollapsed && setLegendCollapsed(false)}
+                title={legendCollapsed ? "Show Map Legend" : ""}
               >
-                <History
-                  size={16}
-                  className="text-[#1a2caa] me-2 flex-shrink-0"
-                />
-                {!tripAnalysisCollapsed && (
-                  <h6 className="mb-0 text-[#1a2caa] fw-bold text-uppercase small tracking-widest">
-                    Trip Analysis
+                <List size={20} className="text-[#1a2caa] flex-shrink-0" />
+                {!legendCollapsed && (
+                  <h6 className="mb-0 ms-2 fw-bold text-uppercase tracking-wider extra-small text-muted">
+                    Map Legend
                   </h6>
                 )}
               </div>
-
-              <div className="d-flex align-items-center gap-2">
-                {!tripAnalysisCollapsed && (
-                  <button
-                    className="btn btn-close shadow-none small me-2 opacity-45"
-                    style={{ fontSize: "0.3rem" }}
-                    onClick={() => setRouteAnalysis(null)}
-                  ></button>
-                )}
+              {!legendCollapsed && (
                 <button
-                  className="btn btn-link p-0 text-gray-400 shadow-none border-0"
-                  onClick={() =>
-                    setTripAnalysisCollapsed(!tripAnalysisCollapsed)
-                  }
+                  className="btn btn-link p-0 text-muted shadow-none border-0"
+                  onClick={() => setLegendCollapsed(true)}
                 >
-                  {tripAnalysisCollapsed ? (
-                    <ChevronLeft size={18} />
-                  ) : (
-                    <ChevronRight size={18} />
-                  )}
+                  <ChevronLeft size={18} />
                 </button>
-              </div>
+              )}
             </div>
-            {!tripAnalysisCollapsed && (
-              <div
-                className="card-body p-3 scroll-modern flex-grow-1"
-                style={{
-                  overflowY: "auto",
-                  maxHeight: "calc(420px - 56px)", // 420px minus header height
-                  minHeight: 0,
-                }}
-              >
-                <div className="mb-3">
-                  <div className="d-flex align-items-center gap-2 mb-1">
-                    <div
-                      className="rounded-circle bg-[#1a2caa] opacity-10"
-                      style={{ width: "8px", height: "8px" }}
-                    ></div>
-                    <span className="extra-small text-muted fw-bold text-uppercase">
-                      From
-                    </span>
-                    <span className="small fw-bold">{source}</span>
-                  </div>
+          </div>
+          {!legendCollapsed && (
+            <div className="card-body p-3">
+              <div className="vstack gap-2">
+                {agencies.cmrl.active && (
+                  <>
+                    <div className="d-flex align-items-center gap-2">
+                      <div
+                        style={{
+                          width: "12px",
+                          height: "3px",
+                          backgroundColor: "#000092",
+                          borderRadius: "2px",
+                        }}
+                      ></div>
+                      <span className="extra-small fw-semibold text-muted">
+                        CMRL Blue Line
+                      </span>
+                    </div>
+                    <div className="d-flex align-items-center gap-2">
+                      <div
+                        style={{
+                          width: "12px",
+                          height: "3px",
+                          backgroundColor: "#00A700",
+                          borderRadius: "2px",
+                        }}
+                      ></div>
+                      <span className="extra-small fw-semibold text-muted">
+                        CMRL Green Line
+                      </span>
+                    </div>
+                  </>
+                )}
+                {agencies.srr.active && (
                   <div className="d-flex align-items-center gap-2">
                     <div
-                      className="rounded-circle bg-[#1a2caa] opacity-10"
-                      style={{ width: "8px", height: "8px" }}
+                      style={{
+                        width: "12px",
+                        height: "3px",
+                        backgroundColor: agencies.srr.color,
+                        borderRadius: "2px",
+                      }}
                     ></div>
-                    <span className="extra-small text-muted fw-bold text-uppercase">
-                      To
-                    </span>
-                    <span className="small fw-bold ps-4">{destination}</span>
-                  </div>
-                </div>
-
-                <div className="row g-2 mb-3">
-                  <div className="col-4">
-                    <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
-                      <div className="text-muted extra-small text-uppercase">
-                        Time
-                      </div>
-                      <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                        {routeAnalysis.total_duration_minutes || "--"}
-                        <span className="ms-1" style={{ fontSize: "0.65rem" }}>
-                          min
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-4">
-                    <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
-                      <div className="text-muted extra-small text-uppercase">
-                        Stops
-                      </div>
-                      <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                        {routeAnalysis.total_stops || "0"}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-4">
-                    <div className="bg-light p-2 rounded-3 text-center border-bottom border-blue-200 border-2">
-                      <div className="text-muted extra-small text-uppercase">
-                        Transfer
-                      </div>
-                      <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                        {routeAnalysis.transfer ? "Yes" : "No"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {routeAnalysis.exchange_point && (
-                  <div className="mb-2">
-                    <span className="badge bg-warning text-dark px-2 py-1 rounded-pill">
-                      Exchange at: {routeAnalysis.exchange_point}
+                    <span className="extra-small fw-semibold text-muted">
+                      Suburban Rail
                     </span>
                   </div>
                 )}
-
-                {routeAnalysis.segments &&
-                  routeAnalysis.segments.map((seg, idx) => (
+                {agencies.mtc.active && (
+                  <div className="d-flex align-items-center gap-2">
                     <div
-                      key={idx}
-                      className="bg-white p-3 rounded-3 shadow-sm mb-2 border border-2"
-                      style={{ borderColor: "#bfdbfe" }}
-                    >
-                      <div className="d-flex align-items-center justify-content-between mb-2">
-                        <div className="d-flex align-items-center gap-2">
-                          <Milestone size={14} className="text-muted" />
-                          <span className="small fw-bold text-muted">
-                            Segment {idx + 1}: {seg.from} → {seg.to}
-                          </span>
-                        </div>
-                        <span
-                          className="badge extra-small border"
-                          style={{
-                            backgroundColor: "#eef2ff",
-                            color: "#1a2caa",
-                            borderColor: "#c7d2fe",
-                          }}
-                        >
-                          {seg.route_id}
-                        </span>
-                      </div>
-                      <div className="h6 text-[#1a2caa] fw-black text-uppercase mb-1">
-                        {seg.route_long_name}
-                      </div>
-                      <div className="small text-muted d-flex align-items-center gap-1 mb-1">
-                        <MapIcon size={12} />
-                        <span>
-                          Towards {seg.trip_headsign || "Destination"}
-                        </span>
-                      </div>
-                      <div className="row g-2 mb-1">
-                        <div className="col-4">
-                          <div className="text-muted extra-small text-uppercase">
-                            Time
-                          </div>
-                          <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                            {seg.duration_minutes || "--"}
-                            <span
-                              className="ms-1"
-                              style={{ fontSize: "0.65rem" }}
-                            >
-                              min
-                            </span>
-                          </div>
-                        </div>
-                        <div className="col-4">
-                          <div className="text-muted extra-small text-uppercase">
-                            Stops
-                          </div>
-                          <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                            {seg.stops_count || "0"}
-                          </div>
-                        </div>
-                        <div className="col-4">
-                          <div className="text-muted extra-small text-uppercase">
-                            Dist.
-                          </div>
-                          <div className="fw-bold h6 mb-0 text-[#1a2caa]">
-                            {seg.direct_distance_km
-                              ? parseFloat(seg.direct_distance_km).toFixed(1)
-                              : "--"}
-                            <span
-                              className="ms-1"
-                              style={{ fontSize: "0.65rem" }}
-                            >
-                              km
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      {seg.intermediate_stops &&
-                        seg.intermediate_stops.length > 0 && (
-                          <div className="mt-2 mb-3">
-                            <button
-                              className="btn btn-sm btn-link p-0 text-muted shadow-none d-flex align-items-center gap-1 w-100 justify-content-between"
-                              onClick={() =>
-                                setShowIntermediateStops(
-                                  showIntermediateStops === idx ? null : idx,
-                                )
-                              }
-                            >
-                              <span className="text-uppercase small fw-bold tracking-tighter">
-                                Intermediate Stops
-                              </span>
-                              <div className="d-flex align-items-center gap-1">
-                                <span className="extra-small opacity-50">
-                                  {seg.intermediate_stops.length} stops
-                                </span>
-                                <ChevronRight
-                                  size={14}
-                                  style={{
-                                    transform:
-                                      showIntermediateStops === idx
-                                        ? "rotate(90deg)"
-                                        : "none",
-                                    transition: "transform 0.2s",
-                                  }}
-                                />
-                              </div>
-                            </button>
-                            {showIntermediateStops === idx && (
-                              <div className="mt-2 animate animate-fade-in">
-                                <div className="vstack gap-2 border-start ms-2 ps-3">
-                                  {seg.intermediate_stops.map((stop, sidx) => (
-                                    <div
-                                      key={sidx}
-                                      className="small text-muted position-relative"
-                                    >
-                                      <div
-                                        className="position-absolute start-0 top-50 translate-middle-x bg-light rounded-circle"
-                                        style={{
-                                          width: "6px",
-                                          height: "6px",
-                                          marginLeft: "-15px",
-                                        }}
-                                      ></div>
-                                      {stop}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                      style={{
+                        width: "12px",
+                        height: "3px",
+                        backgroundColor: agencies.mtc.color,
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span className="extra-small fw-semibold text-muted">
+                      MTC Bus Routes
+                    </span>
+                  </div>
+                )}
+                {(agencies.cmrl.active ||
+                  agencies.srr.active ||
+                  agencies.mtc.active) && (
+                    <div className="d-flex align-items-center gap-2 mt-1 pt-1 border-top">
+                      <div
+                        style={{
+                          width: "10px",
+                          height: "10px",
+                          borderRadius: "50%",
+                          backgroundColor: "#fff",
+                          border: "2px solid #555",
+                        }}
+                      ></div>
+                      <span className="extra-small fw-semibold text-muted">
+                        Station / Stop
+                      </span>
                     </div>
-                  ))}
+                  )}
               </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div
-        className="position-absolute m-3 mt-4"
-        style={{ bottom: 0, left: 0, zIndex: 10, width: "220px" }}
-      >
-        <div className="card shadow-sm border-0 rounded-4 overflow-hidden">
-          <div className="card-header bg-white border-bottom p-2 px-3">
-            <div className="d-flex align-items-center">
-              <Info size={14} className="text-secondary me-2" />
-              <h6 className="mb-0 fw-bold text-uppercase tracking-wider extra-small text-muted">
-                Map Legend
-              </h6>
             </div>
-          </div>
-          <div className="card-body p-3">
-            <div className="vstack gap-2">
-              {agencies.cmrl.active && (
-                <>
-                  <div className="d-flex align-items-center gap-2">
-                    <div
-                      style={{
-                        width: "12px",
-                        height: "3px",
-                        backgroundColor: "#000092",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span className="extra-small fw-semibold text-muted">
-                      CMRL Blue Line
-                    </span>
-                  </div>
-                  <div className="d-flex align-items-center gap-2">
-                    <div
-                      style={{
-                        width: "12px",
-                        height: "3px",
-                        backgroundColor: "#00A700",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span className="extra-small fw-semibold text-muted">
-                      CMRL Green Line
-                    </span>
-                  </div>
-                </>
-              )}
-              {agencies.srr.active && (
-                <div className="d-flex align-items-center gap-2">
-                  <div
-                    style={{
-                      width: "12px",
-                      height: "3px",
-                      backgroundColor: agencies.srr.color,
-                      borderRadius: "2px",
-                    }}
-                  ></div>
-                  <span className="extra-small fw-semibold text-muted">
-                    Suburban Rail
-                  </span>
-                </div>
-              )}
-              {agencies.mtc.active && (
-                <div className="d-flex align-items-center gap-2">
-                  <div
-                    style={{
-                      width: "12px",
-                      height: "3px",
-                      backgroundColor: agencies.mtc.color,
-                      borderRadius: "2px",
-                    }}
-                  ></div>
-                  <span className="extra-small fw-semibold text-muted">
-                    MTC Bus Routes
-                  </span>
-                </div>
-              )}
-              {(agencies.cmrl.active ||
-                agencies.srr.active ||
-                agencies.mtc.active) && (
-                <div className="d-flex align-items-center gap-2 mt-1 pt-1 border-top">
-                  <div
-                    style={{
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      backgroundColor: "#fff",
-                      border: "2px solid #555",
-                    }}
-                  ></div>
-                  <span className="extra-small fw-semibold text-muted">
-                    Station / Stop
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -1467,6 +1466,7 @@ const MapComponent = () => {
         }
         .scroll-modern::-webkit-scrollbar {
           width: 4px;
+          height: 0px; /* Hide horizontal scrollbar */
         }
         .scroll-modern::-webkit-scrollbar-track {
           background: #f1f1f1;
@@ -1480,9 +1480,9 @@ const MapComponent = () => {
         }
 
          .maplibregl-ctrl-top-right {
-          right: var(--nav-offset) !important;
-          transition: right 0.3s ease-in-out;
-          margin-top: 16px !important;
+          right: 16px !important;
+          transition: all 0.3s ease-in-out;
+          margin-top: ${rightPanelCollapsed ? "80px" : "16px"} !important;
         }
       `}</style>
     </div>
