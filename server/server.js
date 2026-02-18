@@ -38,9 +38,13 @@ async function testDatabaseConnection() {
   }
 }
 
-app.listen(PORT, async () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV}`);
-  console.log(`Database: ${process.env.DB_HOST}/${process.env.DB_NAME}`);
-  await testDatabaseConnection();
-});
+if (process.env.NODE_ENV !== "production") {
+  app.listen(PORT, async () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
+    console.log(`Database: ${process.env.DB_HOST}/${process.env.DB_NAME}`);
+    await testDatabaseConnection();
+  });
+}
+
+export default app;
